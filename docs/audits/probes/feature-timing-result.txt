@@ -1,0 +1,7 @@
+Case: timing; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+Exit 0 confirms observations reproduced; it does not mean defects fixed
+unblock_released_control: releases=1 stops=1
+unblock_repressed_before_drain: releases=0 stops=1
+overlap_after_first_reset: multiplier=1.0 resets=1 (second request still pending)
+prior_multiplier_0.4_after_all_resets: multiplier=1.0

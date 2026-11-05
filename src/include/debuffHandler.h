@@ -2,6 +2,7 @@
 #include "lib/robin_hood.h"
 #include <mutex>
 #include <shared_mutex>
+#include <unordered_set>
 
 /*Class handling actor debuffs and corresponding UI alerts.*/
 class debuffHandler
@@ -18,7 +19,8 @@ public:
 	}
 
 	/*called along with the main update hook.*/
-	void update();
+		void update(float delta = -1);
+	void reset();
 
 	/*@return whether this actor is in stamina debuff.*/
 	bool isInDebuff(RE::Actor* actor);
@@ -34,8 +36,8 @@ public:
 private:
 
 
-	static void async_pcStaminaMeterFlash();
-	static inline std::atomic<bool> async_pcStaminaMeterFlash_b;
+		std::unordered_set<RE::ActorHandle> ownedPerks, ownedUI, ownedGraphs;
+	float flashCountdown{0};
 
 	RE::BGSPerk* debuffPerk;
 	RE::BSFixedString gv_bExhausted = "val_bExhausted";

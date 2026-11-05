@@ -1,7 +1,7 @@
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 set(SOURCE_DIR "${ROOT_DIR}/src")
-file(GLOB_RECURSE SOURCE_FILES "${SOURCE_DIR}/*.cpp" "${SOURCE_DIR}/*.h" "${SOURCE_DIR}/*.hpp")	
+file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS "${SOURCE_DIR}/*.cpp" "${SOURCE_DIR}/*.h" "${SOURCE_DIR}/*.hpp")
 
 # 对 SourceFile 变量里面的所有文件分类(保留资源管理器的目录结构)
 foreach(fileItem ${SOURCE_FILES})       
@@ -39,8 +39,6 @@ add_library(
 	${SOURCE_FILES}
 	"${VERSION_HEADER}"
 	"${CMAKE_CURRENT_BINARY_DIR}/version.rc"
-	"${ROOT_DIR}/.clang-format"
-	"${ROOT_DIR}/.editorconfig"
 )
 
 target_compile_features(
@@ -61,6 +59,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 			"/Zc:preprocessor"	# Enable preprocessor conformance mode
 
 			"/wd4200" # nonstandard extension used : zero-sized array in struct/union
+			"/wd4100" # engine callback signatures contain unused parameters
+			"/wd4505" # legacy header-local utility functions
 
 			"$<$<CONFIG:DEBUG>:>"
 			"$<$<CONFIG:RELEASE>:/Zc:inline;/JMC-;/Ob3>"
@@ -81,9 +81,15 @@ target_include_directories(
 		"${SOURCE_DIR}"
 )
 
+target_compile_definitions("${PROJECT_NAME}" PRIVATE NOMINMAX)
+
 set(SKSE_SUPPORT_XBYAK ON)
 
-if(DEFINED ENV{COMMONLIB_SSE_FOLDER})
+if(DEFINED COMMONLIB_SSE_PATH)
+	add_subdirectory("${COMMONLIB_SSE_PATH}" CommonLibSSE EXCLUDE_FROM_ALL)
+elseif(EXISTS "${ROOT_DIR}/.deps/CommonLibSSE-NG/CMakeLists.txt")
+	add_subdirectory("${ROOT_DIR}/.deps/CommonLibSSE-NG" CommonLibSSE EXCLUDE_FROM_ALL)
+elseif(DEFINED ENV{COMMONLIB_SSE_FOLDER})
 	add_subdirectory("$ENV{COMMONLIB_SSE_FOLDER}" CommonLibSSE EXCLUDE_FROM_ALL)
 else()
 	add_subdirectory("$ENV{CommonLibSSEPath_NG}" CommonLibSSE EXCLUDE_FROM_ALL)

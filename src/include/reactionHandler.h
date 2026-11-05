@@ -21,11 +21,11 @@ public:
 	static void triggerRecoil(RE::Actor* reactor, reactionType);
 	/*Initialize a downed state for an actor.
 	@param a_actor: actor to enter downed state*/
-	static void triggerDownedState(RE::Actor* a_actor);
+	static bool triggerDownedState(RE::Actor* a_actor);
 
 	/*Recover an actor from the downed state.
 	@param a_actor: actor to recover from downed state.*/
-	static void recoverDownedState(RE::Actor* a_actor);
+	static bool recoverDownedState(RE::Actor* a_actor);
 private:
 	/*Asynchronous function to trigger a stagger after 0.1 sec of waiting time, to ensure the previous "staggerstop" event is received.*/
 	static void async_triggerContinuousStagger(RE::Actor* causer, RE::Actor* reactor, reactionType reactionType);

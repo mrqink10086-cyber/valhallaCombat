@@ -26,11 +26,10 @@ namespace RE
 		typedef RE::TESObjectREFR* (_fastcall* _getEquippedShield)(RE::Actor* a_actor);
 		inline static REL::Relocation<_getEquippedShield> getEquippedShield{ RELOCATION_ID(37624, 38577) };
 
-		inline void SGTM(float a_in) {
+			inline float getSGTM() { return *reinterpret_cast<float*>(RELOCATION_ID(511883, 388443).address()); }
+			inline void SGTM(float a_in) {
 			static float* g_SGTM = (float*)RELOCATION_ID(511883, 388443).address();
 			*g_SGTM = a_in;
-			using func_t = decltype(SGTM);
-			REL::Relocation<func_t> func{ RELOCATION_ID(66989, 68246) };
 			return;
 		}
 		

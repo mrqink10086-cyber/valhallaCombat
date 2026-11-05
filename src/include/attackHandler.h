@@ -19,7 +19,8 @@ public:
 	/*mapping of all actors who:
 	1. are attacking（swinging a weapon)
 	2. have not hit any target.*/
-	std::unordered_set<RE::Actor*> cachedAttackers;
+	std::unordered_set<RE::ActorHandle> cachedAttackers;
+	void reset() { std::lock_guard lock(mtx); cachedAttackers.clear(); actorToRegenStamina = nullptr; }
 	/*registers a light/heavy attack.
 	    checks iff there is a previous attack not checked out, if so,
 		check out the attack.*/

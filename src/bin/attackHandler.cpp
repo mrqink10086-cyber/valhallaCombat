@@ -22,7 +22,7 @@ void attackHandler::cacheAttack(RE::Actor* a_actor) {
 		else {
 			//DEBUG("registered light attack");
 			mtx.lock();
-			cachedAttackers.insert(a_actor);
+				cachedAttackers.insert(a_actor->GetHandle());
 			mtx.unlock();
 			//DEBUG("attack heap size: {}", attackerHeap.size());
 		}
@@ -38,19 +38,13 @@ void attackHandler::OnLightHit(RE::Actor* a_actor) {
 	staminaHandler::staminaLightHit(a_actor);
 
 	mtx.lock();
-	cachedAttackers.erase(a_actor);
+	cachedAttackers.erase(a_actor->GetHandle());
 	mtx.unlock();
 }
 
 
 void attackHandler::checkout(RE::Actor* a_actor) {
-	auto it = cachedAttackers.find(a_actor);
-	if (it == cachedAttackers.end()) {
-		return;
-	}
-	
+	if (!a_actor) return;
+	{ std::lock_guard lock(mtx); if (!cachedAttackers.erase(a_actor->GetHandle())) return; }
 	staminaHandler::staminaLightMiss(a_actor);
-	mtx.lock();
-	cachedAttackers.erase(it);
-	mtx.unlock();
 }

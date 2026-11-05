@@ -1,0 +1,15 @@
+# Valhalla Combat — native menu build
+
+Install the archive as a complete replacement of Valhalla Combat in your mod manager. Its root corresponds to Skyrim's `Data` directory. Enable `ValhallaCombat.esp` and install the matching SKSE and Address Library for your game. Install SKSE Menu Framework 3.8 / API 1 to use the native menu. TrueHUD and Precision remain optional integrations. This build targets SE and AE with one DLL; VR is excluded.
+
+Open SKSE Menu Framework and select **Valhalla Combat**. The menu provides Chinese/English labels, draft changes, Apply, Undo, Defaults, Reload and keyboard/mouse/gamepad binding capture. Changes apply through the game task queue, including while paused. Diagnostics distinguishes saved/effective revisions, pending effect cleanup and engine acceptance of execution requests.
+
+Configuration is created at `Data/SKSE/Plugins/ValhallaCombat/Settings.ini`. First launch merges built-in defaults, any legacy MCM defaults, the historical SKSE INI, then MCM user overrides. A legacy same-path file is backed up to `.legacy.bak`; `[Meta] Schema=1` prevents repeated migration. Leave old configuration files available for this first launch. Do not install a default INI over your existing settings. Missing Menu Framework leaves gameplay and file configuration available.
+
+Disable the old Valhalla mod files before installing this replacement, then keep its legacy configuration files for migration. The new archive includes no MCM JSON, MCM PEX or Scaleform menu assets. Its ESP removes the menu-only quest and unused MCMHelper/SkyUI masters; the other 249 records and their FormKeys are verified unchanged. Other mods may still require MCMHelper/SkyUI; retain those dependencies when needed. Previously saved Papyrus script instances are part of the save and are not edited by this package.
+
+Gameplay keeps the established light-stun default of zero, 3-second recovery delay plus 7-second regeneration, subsequent-hit automatic execution and key-down execution input. The perfect-block setting uses accumulation count. Unsupported level-limit/player-execution settings are not exposed as working controls.
+
+This build passed a Release compilation with warnings treated as errors and nine host regression suites, also run with MSVC AddressSanitizer. The projectile virtual-function ABI and all custom callsite locations were checked against SE 1.5.97 and AE 1.6.1170 binaries. Game testing remains for menu fonts/controller navigation, paused input and Apply, native/Precision contact ordering, collision filters, animation acceptance and save/load reconciliation. No 1.7.99+ binary or game run was available for this build.
+
+SKSE Menu Framework public SDK: version 3.8 / API 1, SHA256 `03a39ccef309d234b0575e307f741907a18a389dc4a9e398730a1823db8c5153`, vendored under its GPL-3.0 license. Original mod assets come from the verified v0.2.0-NG release. No game executables, development tools or framework runtime DLL are bundled.

@@ -50,7 +50,7 @@ void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::H
 		}
 	}
 
-	if (stunHandler::GetSingleton()->getIsStunBroken(a_victim) && a_hitData.weapon->IsMelee()) {
+	if (stunHandler::GetSingleton()->getIsStunBroken(a_victim) && (!a_hitData.weapon || a_hitData.weapon->IsMelee())) {
 		if (a_aggressor->IsPlayerRef()) {
 			if (settings::bAutoExecution) {//player only auto-execute if auto execution is on
 				executionHandler::GetSingleton()->attemptExecute(a_aggressor, a_victim);
@@ -66,7 +66,7 @@ void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::H
 		bool b;
 		//TODO:redo stun damage for elden counter
 		if (a_aggressor->GetGraphVariableBool(data::GraphBool_IsGuardCountering, b) && b) {
-			stunHandler::GetSingleton()->processStunDamage(stunHandler::STUNSOURCE::powerAttack, a_hitData.weapon, a_aggressor, a_victim, realDamage);
+			stunHandler::GetSingleton()->processStunDamage(stunHandler::STUNSOURCE::counterAttack, a_hitData.weapon, a_aggressor, a_victim, realDamage);
 		} else {
 			stunHandler::GetSingleton()->processStunDamage(stunHandler::STUNSOURCE::powerAttack, a_hitData.weapon, a_aggressor, a_victim, realDamage);
 		}

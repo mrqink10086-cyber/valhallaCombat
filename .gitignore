@@ -9,5 +9,10 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 build
+.deps/
+tools/AssetMigration/bin/
+tools/AssetMigration/obj/
+out/
+__pycache__/
 .clang-format
 .editorconfig

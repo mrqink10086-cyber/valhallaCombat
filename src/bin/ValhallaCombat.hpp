@@ -1,4 +1,6 @@
 #pragma once
+#include "include/CombatRuntime.h"
+#include "include/OwnedEffects.h"
 #include "include/debuffHandler.h"
 #include "include/blockHandler.h"
 #include "include/stunHandler.h"
@@ -59,10 +61,13 @@ public:
 
 	/*Runs every frame when game is not paused.*/
 	void update() {
-		if (RE::UI::GetSingleton()->GameIsPaused()) {
+			auto ui = RE::UI::GetSingleton();
+			CombatRuntime::get().update(!ui || ui->GameIsPaused());
+			if (!CombatRuntime::get().ready() || !ui || ui->GameIsPaused()) {
 			return;
 		}
-		if (update_DebuffHandler) {
+			OwnedEffects::update();
+			if (update_DebuffHandler) {
 			debuffHandler::GetSingleton()->update();
 		}
 		if (update_BlockHandler) {
@@ -71,6 +76,7 @@ public:
 		if (update_StunHandler) {
 			stunHandler::GetSingleton()->update();
 		}
+		settings::cleanupReceipt();
 		blockCommitment::GetSingleton()->update();
 		//if (update_balanceHandler) {
 			//balanceHandler::GetSingleton()->update();

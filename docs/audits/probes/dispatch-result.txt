@@ -1,0 +1,7 @@
+Case: dispatch; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+mapped_sword_control: accepted=1 queued=1 (expected=1,1)
+unmapped_mod_race: accepted=0 queued=0 (expected rejection)
+mapped_undead_unarmed: accepted=1 queued=0 (accepted without dispatch)
+near_unmapped_masks_far_mapped: queued=0 (expected=1)
+near_essential_masks_far_valid: queued=0 (expected=1)

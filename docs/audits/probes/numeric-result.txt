@@ -1,0 +1,7 @@
+Case: numeric; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+default_light_10x100: stun=100.0/100.0 damage_calls=0 (expect unchanged with multiplier=0)
+light_multiplier_1_control: stun=80.0 (expected=80)
+health100_stamina300_power_budget100: stun=100.0/200.0 (100 health-damage budget assumed)
+restore_hook_arithmetic: stun 50.0 -> 100.0 after modStun(+50)
+broken_recovery_after_countdown: in_combat=1 can_regen=1 stun=200.0/200.0 after7s

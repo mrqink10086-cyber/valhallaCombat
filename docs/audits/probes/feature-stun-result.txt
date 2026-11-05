@@ -1,0 +1,5 @@
+Case: stun; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+Exit 0 confirms observations reproduced; it does not mean defects fixed
+downed_recovery_toggle_on_control: tracked=0 downed=0
+disable_downed_before_recovery: tracked=0 downed=1

@@ -1,0 +1,11 @@
+Case: block; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+Exit 0 confirms observations reproduced; it does not mean defects fixed
+repress_inside_window: held=0 (new physical down should set true)
+disable_before_keyup: held=1 (physical release should clear)
+precision_tackle_only: calls=0 (tackle enabled, timed block disabled)
+precision_tackle_with_timed_block_control: calls=1
+exact_depletion: stamina=0.0 debuff_calls=0
+insufficient_control: stamina=0.0 debuff_calls=1 health_damage=1.0
+partial_block_mult_0.5: health_damage=-60.0 (linear conversion would be20)
+partial_block_mult_2: health_damage=87.5 (linear conversion would be75)

@@ -1,0 +1,8 @@
+Case: debuff; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+Exit 0 confirms observations reproduced; it does not mean defects fixed
+natural_recovery: tracked=0 graph_exhausted=1
+stop_after_natural_recovery: graph_exhausted=1
+explicit_stop_control: graph_exhausted=0
+ui_disabled_before_cleanup: worker_flag=1
+ui_enabled_cleanup_control: worker_flag=0

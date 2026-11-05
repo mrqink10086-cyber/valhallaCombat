@@ -6,41 +6,42 @@
 #define DATA data::GetSingleton()
 using namespace inlineUtils;
 void executionHandler::tryPcExecution() {
+	if (!CombatRuntime::get().ready()) return;
+	report("No eligible execution target in range");
 
 	auto pc = RE::PlayerCharacter::GetSingleton();
 	if (!pc) {
 		return;
 	}
-	RE::Actor* optimalVictim = nullptr; //optimal target to execute
-	float curr_min_dist = HUGE_VALF; //minimum range to the optimal victim so far
+		std::vector<std::pair<float, RE::ActorHandle>> candidates;
 
 	for (auto& handle : stunHandler::GetSingleton()->getStunBrokenActors()) {
 		if (!handle) {
 			continue;
 		}
-		auto actor = handle.get().get();
+			auto actorRef = handle.get();
+			auto actor = actorRef.get();
 		
 		if (!actor || !actor->Is3DLoaded() || Utils::Actor::isDead(actor) || actor->IsInKillMove() ||
 			!actor->GetActorRuntimeData().currentProcess || !actor->GetActorRuntimeData().currentProcess->InHighProcess()) {
-			return;
+				continue;
 		}
 		float dist = pc->GetPosition().GetDistance(actor->GetPosition());
 		if (dist < 250) {
-			if (dist < curr_min_dist) {
-				curr_min_dist = dist;
-				optimalVictim = actor;
-			}
+				candidates.emplace_back(dist, handle);
 		}
 	}
 	
-	if (optimalVictim) {
-		attemptExecute(pc, optimalVictim);
-	}
+		std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+		for (const auto& candidate : candidates) {
+			auto actor = candidate.second.get();
+			if (actor && attemptExecute(pc, actor.get())) break;
+		}
 
 }
 bool executionHandler::attemptExecute(RE::Actor* a_executor, RE::Actor* a_victim) {
 	//check if victim can be executed
-	if (!settings::bStunToggle
+		if (!CombatRuntime::get().ready() || !a_executor || !a_victim || !settings::bStunToggle
 		|| !Utils::Actor::isHumanoid(a_executor) || Utils::Actor::isDead(a_executor) || Utils::Actor::isDead(a_victim)
 		|| !a_executor->Is3DLoaded() || !a_victim->Is3DLoaded()
 		|| a_executor->IsInKillMove() || a_victim->IsInKillMove()
@@ -51,13 +52,15 @@ bool executionHandler::attemptExecute(RE::Actor* a_executor, RE::Actor* a_victim
 		return false;
 	}
 
-	auto victimRace = a_victim->GetRace();
+		if (!stunHandler::GetSingleton()->getIsStunBroken(a_victim) || pending.contains(a_executor->GetHandle()) || pending.contains(a_victim->GetHandle())) return false;
+		auto victimRace = a_victim->GetRace();
 	if (!victimRace) {
 		return false;
 	}
 	
 	auto it2 = data::raceMapping.find(victimRace);
 	if (it2 == data::raceMapping.end()) {
+		report("Rejected: target race has no execution mapping");
 		return false;
 	}
 	auto victimRaceType = it2->second;
@@ -79,7 +82,8 @@ bool executionHandler::attemptExecute(RE::Actor* a_executor, RE::Actor* a_victim
 
 	//logger::info("weapon type is {}", weaponType);
 #define RACE data::raceCatagory
-	switch (victimRaceType) {
+		const auto before = queued;
+		switch (victimRaceType) {
 	case RACE::Humanoid: executeHumanoid(a_executor, a_victim, weaponType); break;
 	case RACE::Undead: executeDraugr(a_executor, a_victim, weaponType); break;
 	case RACE::Falmer: executeFalmer(a_executor, a_victim, weaponType); break;
@@ -102,59 +106,51 @@ bool executionHandler::attemptExecute(RE::Actor* a_executor, RE::Actor* a_victim
 	case RACE::Dragon: executeDragon(a_executor, a_victim, weaponType); break;
 	default: return false; //iff no body part match, no need to set ghost.
 	}
-	return true;
+		if (queued==before) report("Rejected: no supported idle for this race and weapon");
+		return queued != before;
 };
 
-inline void playExecutionIdle(RE::Actor* a_executor, RE::Actor* a_victim, RE::TESIdleForm* a_executionIdle) {
-	RE::Offset::playPairedIdle(a_executor->GetActorRuntimeData().currentProcess, a_executor, RE::DEFAULT_OBJECT::kActionIdle, a_executionIdle, true, false, a_victim);
-}
-
-void executionHandler::async_queueExecutionThreadFunc(RE::Actor* a_executor, RE::Actor* a_victim, std::vector<RE::TESIdleForm*> a_executionIdleV, int i)
+void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim, RE::TESIdleForm* idle, int = 1)
 {
-	while (i > 0) {
-		auto task = SKSE::GetTaskInterface();
-		if (!task) {
-			continue;
-		}
-		if (a_executionIdleV.size() == 0) {
-			logger::error("Error: failed to find any execution idles.");
-		}
-		auto idle = *inlineUtils::select_randomly(a_executionIdleV.begin(), a_executionIdleV.end());
-		task->AddTask([a_executor, a_victim, idle]() {
-			playExecutionIdle(a_executor, a_victim, idle);
+	if (!CombatRuntime::get().ready() || !executor || !victim || !idle) return;
+	const auto a = executor->GetHandle(), b = victim->GetHandle();
+	if (pending.contains(a) || pending.contains(b)) return;
+	const auto race = victim->GetRace();
+	const auto weapon = Utils::Actor::getWieldingWeapon(executor);
+	const auto weaponID = weapon ? weapon->GetFormID() : 0;
+	pending.insert(a); pending.insert(b);
+	const auto ticket = CombatRuntime::get().schedule(0, [this, a, b, idle, race, weaponID] {
+		auto attacker = a.get(); auto target = b.get();
+		bool keepPending=false;
+		const auto release=std::unique_ptr<executionHandler,std::function<void(executionHandler*)>>(this,[&keepPending,a,b](executionHandler* self) {
+			if (!keepPending) { self->pending.erase(a); self->pending.erase(b); }
 		});
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
-		i--;
-	}
-}
-
-void executionHandler::async_queueExecutionThreadFun(RE::Actor* a_executor, RE::Actor* a_victim, RE::TESIdleForm* a_executionIdle, int i)
-{
-	while (i > 0) {
-		auto task = SKSE::GetTaskInterface();
-		if (!task) {
-			continue;
+		report("Cancelled: execution preconditions changed before playback");
+		if (!attacker || !target || Utils::Actor::isDead(attacker.get()) || Utils::Actor::isDead(target.get()) ||
+			!settings::bStunToggle || !stunHandler::GetSingleton()->getIsStunBroken(target.get()) ||
+			!attacker->Is3DLoaded() || !target->Is3DLoaded() || attacker->IsInKillMove() || target->IsInKillMove() ||
+			attacker->IsOnMount() || target->IsOnMount() || target->IsEssential() || target->IsPlayerTeammate() || target->IsPlayerRef() ||
+			target->AsMagicTarget()->HasEffectWithArchetype(RE::MagicTarget::Archetype::kParalysis) || target->GetRace() != race ||
+			attacker->GetPosition().GetDistance(target->GetPosition()) >= 250) return;
+		auto process = attacker->GetActorRuntimeData().currentProcess;
+		auto targetProcess = target->GetActorRuntimeData().currentProcess;
+		auto currentWeapon = Utils::Actor::getWieldingWeapon(attacker.get());
+		if (!process || !process->InHighProcess() || !targetProcess || !targetProcess->InHighProcess() ||
+			(currentWeapon ? currentWeapon->GetFormID() : 0) != weaponID) return;
+		const bool accepted = RE::Offset::playPairedIdle(process, attacker.get(), RE::DEFAULT_OBJECT::kActionIdle, idle, true, false, target.get());
+		logger::debug("Execution {} -> {} engine accepted={}", attacker->GetFormID(), target->GetFormID(), accepted);
+		report(accepted?"Execution accepted by engine":"Execution rejected by engine");
+		if (accepted) {
+			keepPending=CombatRuntime::get().schedule(0.5f, [this, a, b] { pending.erase(a); pending.erase(b); })!=0;
 		}
-		task->AddTask([a_executor, a_victim, a_executionIdle]() {
-			playExecutionIdle(a_executor, a_victim, a_executionIdle);
-		});
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
-		i--;
-	}
+	});
+	if (ticket) { ++queued; report("Execution queued; playback not yet confirmed"); } else { pending.erase(a); pending.erase(b); report("Execution request cancelled with session"); }
 }
-
-
-
-void executionHandler::queueExecutionIdle(RE::Actor* a_executor, RE::Actor* a_victim, RE::TESIdleForm* a_executionIdle, int i = 1) 
+void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim, std::vector<RE::TESIdleForm*> idles, int i = 1)
 {
-	std::thread t(async_queueExecutionThreadFun, a_executor, a_victim, a_executionIdle, i);
-	t.detach();
-}
-
-void executionHandler::queueExecutionIdle(RE::Actor* a_executor, RE::Actor* a_victim, std::vector<RE::TESIdleForm*> a_executionIdleVector, int i = 1) 
-{
-	std::jthread t(async_queueExecutionThreadFunc, a_executor, a_victim, a_executionIdleVector, i);
-	t.detach();
+	std::erase(idles, nullptr);
+	if (idles.empty()) { logger::warn("No execution idle for this race/weapon combination"); return; }
+	queueExecutionIdle(executor, victim, *inlineUtils::select_randomly(idles.begin(), idles.end()), i);
 }
 
 

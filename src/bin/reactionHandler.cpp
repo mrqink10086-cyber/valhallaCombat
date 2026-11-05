@@ -24,17 +24,14 @@ static inline const RE::BSFixedString recoilLargeStart = "recoilLargeStart";
 
 void reactionHandler::triggerContinuousStagger(RE::Actor* a_causer, RE::Actor* a_reactor, reactionType a_reactionType) {
 	a_reactor->NotifyAnimationGraph(staggerStop);
-	std::jthread asynStaggerThread(async_triggerContinuousStagger, a_causer, a_reactor, a_reactionType);
-	asynStaggerThread.detach();
+	async_triggerContinuousStagger(a_causer, a_reactor, a_reactionType);
 }
 void reactionHandler::async_triggerContinuousStagger(RE::Actor* a_causer, RE::Actor* a_reactor, reactionType a_reactionType) {
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	const auto task = SKSE::GetTaskInterface();
-	if (task != nullptr) {
-		task->AddTask([a_causer, a_reactor, a_reactionType]() {
-			triggerStagger(a_causer, a_reactor, a_reactionType);
-			});
-	}
+	if (!a_causer || !a_reactor) return;
+	CombatRuntime::get().schedule(0.1f, [causer = a_causer->GetHandle(), reactor = a_reactor->GetHandle(), a_reactionType] {
+		auto a = causer.get(); auto b = reactor.get();
+		if (a && b && a->Is3DLoaded() && b->Is3DLoaded()) triggerStagger(a.get(), b.get(), a_reactionType);
+	});
 };
 	
 void reactionHandler::triggerStagger(RE::Actor* a_aggressor, RE::Actor* a_reactor, float a_reactionMagnitude) {
@@ -77,11 +74,11 @@ void reactionHandler::triggerPoiseReaction(RE::Actor* a_aggressor, RE::Actor* a_
 
 
 void reactionHandler::triggerStagger(RE::Actor* a_causer, RE::Actor* a_reactor, reactionType a_reactionType) {
-	if (a_reactor->AsActorState()->IsSwimming() || a_reactor->IsInKillMove() || !a_reactor->Is3DLoaded()) {
+	if (!a_causer || !a_reactor || a_reactor->AsActorState()->IsSwimming() || a_reactor->IsInKillMove() || !a_reactor->Is3DLoaded()) {
 		return;
 	}
 	if (settings::bStunToggle) {
-		if (data::raceMapping[a_reactor->GetRace()] == data::raceCatagory::Humanoid) {
+		if (data::isRaceType(a_reactor, data::raceCatagory::Humanoid)) {
 			if (stunHandler::GetSingleton()->getIsStunBroken(a_reactor)) {
 				return;//do not stagger stunned actors.
 			}
@@ -94,8 +91,8 @@ void reactionHandler::triggerStagger(RE::Actor* a_causer, RE::Actor* a_reactor, 
 	else {
 		switch (a_reactionType) {
 		case kSmall: triggerStagger(a_causer, a_reactor, 0); break;
-		case kMedium: triggerStagger(a_causer, a_reactor, 0.3); break;
-		case kLarge: triggerStagger(a_causer, a_reactor, 0.7); break;
+		case kMedium: triggerStagger(a_causer, a_reactor, 0.3f); break;
+		case kLarge: triggerStagger(a_causer, a_reactor, 0.7f); break;
 		case kLargest: triggerStagger(a_causer, a_reactor, 10); break;
 		case kKnockBack: triggerKnockBack(a_causer, a_reactor); break;
 		}
@@ -103,9 +100,9 @@ void reactionHandler::triggerStagger(RE::Actor* a_causer, RE::Actor* a_reactor, 
 
 }
 
-void reactionHandler::triggerDownedState(RE::Actor* a_actor) {
+bool reactionHandler::triggerDownedState(RE::Actor* a_actor) {
 	if (!a_actor || a_actor->AsActorState()->IsSwimming() || a_actor->IsInKillMove() || !a_actor->Is3DLoaded()) {
-		return;
+		return false;
 	}
 	auto race = a_actor->GetRace();
 	if (data::raceMapping.contains(race)) {
@@ -113,17 +110,19 @@ void reactionHandler::triggerDownedState(RE::Actor* a_actor) {
 		case data::Humanoid:
 		case data::Undead:
 			if (a_actor->IsInKillMove()) {
-				return;
+				return false;
 			}
-			a_actor->SetGraphVariableBool(bleedOutGraphBool, true);
+			if (!a_actor->SetGraphVariableBool(bleedOutGraphBool, true)) return false;
 			a_actor->NotifyAnimationGraph(bleedOutStart);
+			return true;
 		}
 	}
+	return false;
 }
 
-void reactionHandler::recoverDownedState(RE::Actor* a_actor) {
+bool reactionHandler::recoverDownedState(RE::Actor* a_actor) {
 	if (!a_actor || a_actor->AsActorState()->IsSwimming() || a_actor->IsInKillMove() || !a_actor->Is3DLoaded()) {
-		return;
+		return false;
 	}
 	auto race = a_actor->GetRace();
 	if (data::raceMapping.contains(race)) {
@@ -131,10 +130,12 @@ void reactionHandler::recoverDownedState(RE::Actor* a_actor) {
 		case data::Humanoid:
 		case data::Undead:
 			if (a_actor->IsInKillMove()) {
-				return;
+				return false;
 			}
-			a_actor->SetGraphVariableBool(bleedOutGraphBool, false);
+			if (!a_actor->SetGraphVariableBool(bleedOutGraphBool, false)) return false;
 			a_actor->NotifyAnimationGraph(bleedOutStop);
+			return true;
 		}
 	}
+	return false;
 }

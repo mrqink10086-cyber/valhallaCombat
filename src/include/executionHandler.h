@@ -1,5 +1,7 @@
 #pragma once
 #include "lib/robin_hood.h"
+#include <unordered_set>
+#include <mutex>
 /*Class handling all executions*/
 class executionHandler {
 public:
@@ -17,6 +19,9 @@ public:
 	* attempt to execute the actor closest to the player.
 	* */
 	void tryPcExecution();
+		std::string status() const { std::lock_guard lock(statusMutex); return lastStatus; }
+		void report(std::string value) { std::lock_guard lock(statusMutex); lastStatus=std::move(value); }
+		void reset() { pending.clear(); }
 
 	/// <summary>
 	/// Queue an execution idle for 10 times.
@@ -45,6 +50,8 @@ public:
 
 
 private:
+		mutable std::mutex statusMutex;
+		std::string lastStatus{"No execution requested"};
 	void executeHumanoid(RE::Actor* executer, RE::Actor* victim, RE::WEAPON_TYPE weaponType);
 	void executeDraugr(RE::Actor* executer, RE::Actor* victim, RE::WEAPON_TYPE weaponType);
 	void executeFalmer(RE::Actor* executer, RE::Actor* victim, RE::WEAPON_TYPE weaponType);
@@ -66,8 +73,8 @@ private:
 	void executeLurker(RE::Actor* executer, RE::Actor* victim, RE::WEAPON_TYPE weaponType);
 	void executeDragon(RE::Actor* executer, RE::Actor* victim, RE::WEAPON_TYPE weaponType);
 
-	static inline void async_queueExecutionThreadFunc(RE::Actor* a_executor, RE::Actor* a_victim, std::vector<RE::TESIdleForm*> a_executionIdleV, int i);
-	static inline void async_queueExecutionThreadFun(RE::Actor* a_executor, RE::Actor* a_victim, RE::TESIdleForm* a_executionIdle, int i);
+		std::unordered_set<RE::ActorHandle> pending;
+		std::uint64_t queued{0};
 
 };
 

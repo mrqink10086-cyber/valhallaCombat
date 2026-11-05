@@ -3,6 +3,7 @@
 #include "include/blockHandler.h"
 #include "include/executionHandler.h"
 #include "include/settings.h"
+#include "include/CombatRuntime.h"
 //all credits to Bingle&Ersh
 constexpr uint32_t hash(const char* data, size_t const size) noexcept
 {
@@ -20,27 +21,23 @@ constexpr uint32_t operator"" _h(const char* str, size_t size) noexcept
 	return hash(str, size);
 }
 
-void animEventHandler::ProcessEvent(RE::BSTEventSink<RE::BSAnimationGraphEvent>* a_sink, RE::BSAnimationGraphEvent* a_event, RE::BSTEventSource<RE::BSAnimationGraphEvent>* a_eventSource)
+static void processActor(RE::Actor* actor,std::uint32_t tag)
 {
-	if (!a_event->holder) {
-		return;
-	}
-	std::string_view eventTag = a_event->tag.data();
-
-	switch (hash(eventTag.data(), eventTag.size())) {
+	if (!actor || !CombatRuntime::get().ready()) return;
+	switch (tag) {
 	case "preHitFrame"_h:
 		if (settings::bAttackStaminaToggle) {
-			attackHandler::GetSingleton()->cacheAttack(const_cast<RE::TESObjectREFR*>(a_event->holder)->As<RE::Actor>());
+			attackHandler::GetSingleton()->cacheAttack(actor);
 		} else if (settings::bStaminaDebuffToggle) {
-			staminaHandler::checkStamina(const_cast<RE::TESObjectREFR*>(a_event->holder)->As<RE::Actor>());
+			staminaHandler::checkStamina(actor);
 		}
 		break;
 	case "attackStop"_h:
 		if (settings::bAttackStaminaToggle) {
-			attackHandler::GetSingleton()->checkout(const_cast<RE::TESObjectREFR*>(a_event->holder)->As<RE::Actor>());
+			attackHandler::GetSingleton()->checkout(actor);
 		}
 		if (settings::bStaminaDebuffToggle) {
-			staminaHandler::checkStamina(const_cast<RE::TESObjectREFR*>(a_event->holder)->As<RE::Actor>());
+			staminaHandler::checkStamina(actor);
 		}
 		break;
 	//case "blockStop"_h:
@@ -49,12 +46,20 @@ void animEventHandler::ProcessEvent(RE::BSTEventSink<RE::BSAnimationGraphEvent>*
 	//	}
 	//	break;
 	case "TKDR_IFrameEnd"_h:
-		staminaHandler::checkStamina(const_cast<RE::TESObjectREFR*>(a_event->holder)->As<RE::Actor>());
+		staminaHandler::checkStamina(actor);
 		break;
 	case "Dodge"_h:
-		staminaHandler::checkStamina(const_cast<RE::TESObjectREFR*>(a_event->holder)->As<RE::Actor>());
+		staminaHandler::checkStamina(actor);
 		break;
 	}
+}
+void animEventHandler::ProcessEvent(RE::BSTEventSink<RE::BSAnimationGraphEvent>*,RE::BSAnimationGraphEvent* event,RE::BSTEventSource<RE::BSAnimationGraphEvent>*)
+{
+	if (!event || !event->holder) return;
+	auto actor=const_cast<RE::TESObjectREFR*>(event->holder)->As<RE::Actor>(); if (!actor) return;
+	const std::string_view name=event->tag.data(); const auto tag=hash(name.data(),name.size());
+	if (CombatRuntime::get().ready()) processActor(actor,tag);
+	else CombatRuntime::get().schedule(0,[handle=actor->GetHandle(),tag] { auto resolved=handle.get(); if (resolved) processActor(resolved.get(),tag); });
 }
 
 EventResult animEventHandler::ProcessEvent_NPC(RE::BSTEventSink<RE::BSAnimationGraphEvent>* a_sink, RE::BSAnimationGraphEvent* a_event, RE::BSTEventSource<RE::BSAnimationGraphEvent>* a_eventSource)

@@ -1,0 +1,4 @@
+Case: timing; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+queued_valid_control: calls=1 stale=0 (expected=1,0)
+state_changed_before_task_drain: calls=1 stale=1 (expected no stale engine call)

@@ -1,350 +1,208 @@
-#include "ValhallaCombat.hpp"
 #include "include/stunHandler.h"
-#include "include/hitProcessor.h"
-#include "include/settings.h"
+#include "ValhallaCombat.hpp"
 #include "include/reactionHandler.h"
-#include "include/offsets.h"
 #include "include/Utils.h"
-using uniqueLocker = std::unique_lock<std::shared_mutex>;
-using sharedLocker = std::shared_lock<std::shared_mutex>;
+#include "include/OwnedEffects.h"
 
-void stunHandler::safeErase_ActorStunDataMap(RE::ActorHandle a_handle) {
-	uniqueLocker lock(mtx_ActorStunDataMap);
-	actorStunDataMap.erase(a_handle);
-}
-void stunHandler::safeErase_ActorStunDataMap(RE::Actor* a_actor) {
-	safeErase_ActorStunDataMap(a_actor->GetHandle());
-}
-
-void stunHandler::safeErase_StunBrokenActors(RE::ActorHandle a_handle) {
-	uniqueLocker lock(mtx_StunBrokenActors);
-	stunBrokenActors.erase(a_handle);
-}
-void stunHandler::safeErase_StunBrokenActors(RE::Actor* a_actor) {
-	safeErase_StunBrokenActors(a_actor->GetHandle());
-}
-
-void stunHandler::safeInsert_StunBrokenActors(RE::ActorHandle a_handle) {
-	uniqueLocker lock(mtx_StunBrokenActors);
-	stunBrokenActors.insert(a_handle);
-}
-void stunHandler::safeInsert_StunBrokenActors(RE::Actor* a_actor) {
-	safeInsert_StunBrokenActors(a_actor->GetHandle());
-}
-
-bool stunHandler::safeGet_isStunBroken(RE::ActorHandle a_handle) {
-	sharedLocker lock(mtx_StunBrokenActors);
-	return stunBrokenActors.contains(a_handle);
-}
-
-bool stunHandler::safeGet_isStunBroken(RE::Actor* a_actor) {
-	return safeGet_isStunBroken(a_actor->GetHandle());
-}
-
-
-
-stunHandler::actorStunData_ptr stunHandler::safeInsert_ActorStunDataMap(RE::ActorHandle a_handle) {
-	actorStunData_ptr stunDataPtr(new actorStunData(a_handle));
-	uniqueLocker lock(mtx_ActorStunDataMap);
-	actorStunDataMap.insert(std::pair<RE::ActorHandle, actorStunData_ptr>(a_handle, stunDataPtr));
-	return stunDataPtr;
-}
-
-stunHandler::actorStunData_ptr stunHandler::safeInsert_ActorStunDataMap(RE::Actor* a_actor) {
-	return safeInsert_ActorStunDataMap(a_actor->GetHandle());
-}
-
-
-stunHandler::actorStunData_ptr stunHandler::safeGet_ActorStunData(RE::ActorHandle a_handle) {
-	{
-		sharedLocker lock(mtx_ActorStunDataMap);
-		auto it = actorStunDataMap.find(a_handle);
-		if (it != actorStunDataMap.end()) {
-			return it->second;  //return found stundata
-		}
-	}
-
-	return safeInsert_ActorStunDataMap(a_handle); //otherwise, insert and return inserted ptr
-}
-
-
-stunHandler::actorStunData_ptr stunHandler::safeGet_ActorStunData(RE::Actor* a_actor) {
-	return safeGet_ActorStunData(a_actor->GetHandle());
-}
-
-stunHandler::actorStunData_ptr stunHandler::trackStun(RE::ActorHandle a_actorHandle){
-	return safeInsert_ActorStunDataMap(a_actorHandle);
-};
-
-stunHandler::actorStunData_ptr stunHandler::trackStun(RE::Actor* a_actor) {
-	return safeInsert_ActorStunDataMap(a_actor);
-}
-
-
-void stunHandler::untrackStun(RE::Actor* a_actor) {
-	safeErase_ActorStunDataMap(a_actor);
-	safeErase_StunBrokenActors(a_actor);
-}
-
-void stunHandler::refillStun(RE::Actor* a_actor) {
-	sharedLocker lock(mtx_ActorStunDataMap);
-	auto it = actorStunDataMap.find(a_actor->GetHandle());
-	if (it == actorStunDataMap.end()) {
-		return;
-	}
-	it->second->refillStun();
-}
-
-
-bool stunHandler::getIsStunBroken(RE::Actor* a_actor) {
-	return safeGet_isStunBroken(a_actor);
-}
-
-void stunHandler::update() {
-	uniqueLocker lock_actorStunDataMap(mtx_ActorStunDataMap);
-	if (actorStunDataMap.empty()) {
-		ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::stunHandler);
-		return;
-	}
-	auto it = actorStunDataMap.begin();
-	while (it != actorStunDataMap.end()) {
-		auto& one_handle = it->first;
-		if (!one_handle) {
-			safeErase_StunBrokenActors(one_handle);
-
-			it = actorStunDataMap.erase(it);
-			continue;
-		}
-		
-		auto actor = one_handle.get().get();
-		if (!actor) {
-			safeErase_StunBrokenActors(one_handle);
-			
-			it = actorStunDataMap.erase(it);
-			continue;
-		}
-		
-		if (Utils::Actor::isDead(actor)) {
-			safeErase_StunBrokenActors(one_handle);
-			TrueHUDUtils::revertSpecialMeter(actor);
-			it = actorStunDataMap.erase(it);
-			continue;
-		}
-		auto& stunData = it->second;
-
-		if (stunData->getRegenCountDown() > 0) {
-			stunData->modRegenCountDown(-*RE::Offset::g_deltaTime);
-			
-			it++;
-			continue;
-		}
-			
-		if (stunData->canRegen()) {
-			if (stunData->regenStun()) {
-				stunData->setCombatRegeneration(false);
-				TrueHUDUtils::revertSpecialMeter(actor);
-
-				if (settings::bDownedStateToggle) {
-					reactionHandler::recoverDownedState(actor);
-				}
-
-				safeErase_StunBrokenActors(one_handle);
-
-				it = actorStunDataMap.erase(it);
-				continue;
-			}
-		}
-		it++;
-		
-	}
-}
-
-void stunHandler::async_launchHealthBarFlashThread() {
-	if (async_HealthBarFlashThreadActive) {
-		return;
-	}
-
-	async_HealthBarFlashThreadActive = true;
-	auto flashHealthBarFunc = [&]() {
-		while (true) {
-			{//local scope where to safely iterate through stunned actors.
-				sharedLocker lock(mtx_StunBrokenActors);
-				if (stunBrokenActors.empty()) {
-					async_HealthBarFlashThreadActive = false;//deactivate flash thread.
-					return;
-				}
-				else {
-					for (auto& handle : stunBrokenActors) {
-						if (!handle) {
-							return;
-						}
-						auto actor = handle.get().get();
-						if (actor) {
-							TrueHUDUtils::flashActorValue(actor, RE::ActorValue::kHealth);
-						}
-					}
-				}
-			}//exit scope and sleep the thread for 500 milisecs to check again.
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		}
-	};
-
-	std::jthread t(flashHealthBarFunc);
-	t.detach();
-}
-
-/*Get the max stun of a actor. If the actor is not tracked, return 1.*/
-float stunHandler::getMaxStun(RE::Actor* a_actor) {
-	sharedLocker lock(mtx_ActorStunDataMap);
-	auto it = actorStunDataMap.find(a_actor->GetHandle());
-	if (it == actorStunDataMap.end()) {
-		return 1;
-	} else {
-		return it->second->getMaxStun();
-	}
-}
-
-float stunHandler::getMaxStun_static(RE::Actor* a_actor) {
-	return stunHandler::GetSingleton()->getMaxStun(a_actor);
-}
-
-/*Get the current stun of a actor. If the actor is not tracked, return 1.*/
-float stunHandler::getCurrentStun(RE::Actor* a_actor) {
-	sharedLocker lock(mtx_ActorStunDataMap);
-	auto it = actorStunDataMap.find(a_actor->GetHandle());
-	if (it == actorStunDataMap.end()) {
-		return 1;
-	} else {
-		return it->second->getCurrentStun();
-	}
-}
-
-float stunHandler::getCurrentStun_static(RE::Actor* a_actor) {
-	return stunHandler::GetSingleton()->getCurrentStun(a_actor);
-}
-
-void stunHandler::onStunBroken(RE::Actor* a_actor) {
-	safeInsert_StunBrokenActors(a_actor);
-	async_launchHealthBarFlashThread();
-	ValhallaUtils::playSound(a_actor, data::soundStunBreak);
-	safeGet_ActorStunData(a_actor)->setCombatRegeneration(true);
-	//gray out this actor's stun meter.
-	if (settings::bStunMeterToggle) {
-		TrueHUDUtils::greyOutSpecialMeter(a_actor);
-	}
-}
-
-void stunHandler::damageStun(RE::Actor* a_aggressor, RE::Actor* a_victim, float a_damage) {
-	//DEBUG("Damaging {}'s stun by {} points.", a_victim->GetName(), a_damage);
-	if (safeGet_ActorStunData(a_victim)->damageStun(a_damage)) {
-		if (!safeGet_isStunBroken(a_victim)) {//the current damage depletes actor stun, but actor's stunned state is not yet tracked.
-			onStunBroken(a_victim);
-		}
-	}
-	ValhallaCombat::GetSingleton()->activateUpdate(ValhallaCombat::stunHandler);
-	//DEBUG("damaging done");
-}
-
-
-void stunHandler::processStunDamage(
-	STUNSOURCE a_stunSource, RE::TESObjectWEAP* a_weapon, RE::Actor* a_aggressor, RE::Actor* a_victim, float a_baseDamage) {
-	if (!settings::bStunToggle) { //stun damage will not be applied with stun turned off.
-		return;
-	}
-	if (a_victim->IsPlayerRef()) { //player do not receive stun damage at all.
-		return;
-	}
-	if (a_victim->IsPlayerTeammate() && !settings::bFriendlyStunToggle) { //player's team do not receive stun damage at all.
-		return;
-	}
-	float stunDamage = 0;
-	switch (a_stunSource) {
-	case STUNSOURCE::timedBlock:
-		stunDamage = a_baseDamage * settings::fStunTimedBlockMult;
-		break;
-	case STUNSOURCE::bash:
-		stunDamage = a_aggressor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kBlock) * settings::fStunBashMult;
-		inlineUtils::offsetRealDamage(stunDamage, a_aggressor, a_victim);
-		break;
-	case STUNSOURCE::powerBash:
-		stunDamage = a_aggressor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kBlock) * settings::fStunPowerBashMult;
-		inlineUtils::offsetRealDamage(stunDamage, a_aggressor, a_victim);
-		break;
-	case STUNSOURCE::parry:
-		stunDamage = a_aggressor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kBlock) * settings::fStunParryMult;
-		inlineUtils::offsetRealDamage(stunDamage, a_aggressor, a_victim);
-		break;
-	case STUNSOURCE::lightAttack:
-		stunDamage = a_baseDamage * settings::fStunNormalAttackMult;
-		if (!a_weapon) {
-			stunDamage *= settings::fStunUnarmedMult;
-		}
-		else {
-			switch (a_weapon->GetWeaponType()) {
-			case RE::WEAPON_TYPE::kHandToHandMelee: stunDamage *= settings::fStunUnarmedMult; break;
-			case RE::WEAPON_TYPE::kOneHandDagger: stunDamage *= settings::fStunDaggerMult; break;
-			case RE::WEAPON_TYPE::kOneHandSword: stunDamage *= settings::fStunSwordMult; break;
-			case RE::WEAPON_TYPE::kOneHandAxe: stunDamage *= settings::fStunWarAxeMult; break;
-			case RE::WEAPON_TYPE::kOneHandMace: stunDamage *= settings::fStunMaceMult; break;
-			case RE::WEAPON_TYPE::kTwoHandAxe: stunDamage *= settings::fStun2HBluntMult; break;
-			case RE::WEAPON_TYPE::kTwoHandSword: stunDamage *= settings::fStunGreatSwordMult; break;
-			}
-		}
-		break;
-	case STUNSOURCE::powerAttack:
-		stunDamage = a_baseDamage * settings::fStunPowerAttackMult;
-		if (!a_weapon) {
-			stunDamage *= settings::fStunUnarmedMult;
-		}
-		else {
-			switch (a_weapon->GetWeaponType()) {
-			case RE::WEAPON_TYPE::kHandToHandMelee: stunDamage *= settings::fStunUnarmedMult; break;
-			case RE::WEAPON_TYPE::kOneHandDagger: stunDamage *= settings::fStunDaggerMult; break;
-			case RE::WEAPON_TYPE::kOneHandSword: stunDamage *= settings::fStunSwordMult; break;
-			case RE::WEAPON_TYPE::kOneHandAxe: stunDamage *= settings::fStunWarAxeMult; break;
-			case RE::WEAPON_TYPE::kOneHandMace: stunDamage *= settings::fStunMaceMult; break;
-			case RE::WEAPON_TYPE::kTwoHandAxe: stunDamage *= settings::fStun2HBluntMult; break;
-			case RE::WEAPON_TYPE::kTwoHandSword: stunDamage *= settings::fStunGreatSwordMult; break;
-			}
-		}
-		break;
-	}
-	if (stunDamage != 0) { //only damage when there is damage.
-		damageStun(a_aggressor, a_victim, stunDamage);
-	}
-
-	if (settings::bDownedStateToggle) {
-		if (safeGet_isStunBroken(a_victim) && !a_victim->IsInKillMove()) {
-			reactionHandler::triggerDownedState(a_victim);
-		}
-	}
-}
-
-void stunHandler::modStun(RE::Actor* a_actor, float a_mod)
+void stunHandler::publish()
 {
-	if (!a_actor) {
-		return;
-	}
-	safeGet_ActorStunData(a_actor)->modStun(a_mod);
-	
+    std::unordered_map<RE::ActorHandle, Snapshot> next;
+    for (const auto& [handle, state] : states)
+        if (!state.cleanup) next.emplace(handle, Snapshot{state.maximum, state.current, state.broken});
+    std::lock_guard lock(snapshotMutex);
+    snapshots.swap(next);
 }
-
-std::unordered_set<RE::ActorHandle> stunHandler::getStunBrokenActors() {
-	return stunBrokenActors;
+float stunHandler::getCurrentStun(RE::Actor* actor)
+{
+    if (!actor) return 1;
+    const auto handle = actor->GetHandle();
+    std::lock_guard lock(snapshotMutex);
+    const auto it = snapshots.find(handle);
+    return it == snapshots.end() ? 1 : it->second.current;
 }
-
-void stunHandler::reset() {
-	uniqueLocker lock_actorStunDataMap(mtx_ActorStunDataMap);
-	uniqueLocker lock_stunnedActors(mtx_StunBrokenActors);
-	actorStunDataMap.clear();
-	for (auto& actorHandle : stunBrokenActors) {
-		if (actorHandle) {
-			auto actor = actorHandle.get().get();
-			if (actor) {
-				TrueHUDUtils::revertSpecialMeter(actor);
-			}
-		}
-	}
-	stunBrokenActors.clear();
+float stunHandler::getMaxStun(RE::Actor* actor)
+{
+    if (!actor) return 1;
+    const auto handle = actor->GetHandle();
+    std::lock_guard lock(snapshotMutex);
+    const auto it = snapshots.find(handle);
+    return it == snapshots.end() ? 1 : it->second.maximum;
 }
-
+bool stunHandler::getIsStunBroken(RE::Actor* actor)
+{
+    if (!actor) return false;
+    const auto handle = actor->GetHandle();
+    std::lock_guard lock(snapshotMutex);
+    const auto it = snapshots.find(handle);
+    return it != snapshots.end() && it->second.broken;
+}
+std::unordered_set<RE::ActorHandle> stunHandler::getStunBrokenActors()
+{
+    std::unordered_set<RE::ActorHandle> result;
+    std::lock_guard lock(snapshotMutex);
+    for (const auto& [handle, value] : snapshots) if (value.broken) result.insert(handle);
+    return result;
+}
+bool stunHandler::recover(RE::Actor* actor, State& state)
+{
+    if (state.downed) {
+        if (!actor->Is3DLoaded() || actor->IsInKillMove() || actor->AsActorState()->IsSwimming()) return false;
+        if (!reactionHandler::recoverDownedState(actor)) return false;
+        OwnedEffects::remove(actor,OwnedEffects::downed);
+        state.downed = false;
+    }
+    if (std::exchange(state.meterOwned,false)) TrueHUDUtils::revertSpecialMeter(actor);
+    return true;
+}
+void stunHandler::reset()
+{
+    if (mutating) { resetPending=true; return; }
+    Mutation transaction(*this);
+    for (auto& [handle, state] : states) {
+        auto actor = handle.get();
+        if (actor) recover(actor.get(), state);
+    }
+    states.clear();
+    publish();
+}
+bool stunHandler::pendingCleanup() const
+{
+    for (const auto& [handle,state] : states) if (state.cleanup || (state.downed && !settings::bDownedStateToggle)) return true;
+    return false;
+}
+void stunHandler::refreshMeter(bool enabled)
+{
+    if (mutating) return;
+    Mutation transaction(*this);
+    std::vector<RE::ActorHandle> handles;
+    for (const auto& [handle,state] : states) handles.push_back(handle);
+    for (auto handle : handles) {
+        auto actor=handle.get(); if (!actor) continue;
+        auto& state=states.at(handle);
+        if (!enabled) {
+            if (std::exchange(state.meterOwned,false)) TrueHUDUtils::revertSpecialMeter(actor.get());
+        } else if (state.broken && !state.cleanup && !state.meterOwned) {
+            state.meterOwned=TrueHUDUtils::greyOutSpecialMeter(actor.get());
+        }
+    }
+}
+void stunHandler::update(float delta)
+{
+    if (mutating) return;
+    Mutation transaction(*this);
+    if (delta < 0) delta = std::max(0.0f, *RE::Offset::g_deltaTime);
+    flashCountdown -= delta==0?0:CombatRuntime::get().activeDelta();
+    const bool flash = flashCountdown <= 0;
+    if (flash) flashCountdown = 0.5f;
+    std::vector<RE::ActorHandle> handles;
+    for (const auto& [handle,state] : states) handles.push_back(handle);
+    for (const auto handle : handles) {
+        auto actor = handle.get();
+        if (!actor) { states.erase(handle); continue; }
+        auto& state = states.at(handle);
+        if (!settings::bStunToggle || Utils::Actor::isDead(actor.get())) state.cleanup = true;
+        if (state.downed && !settings::bDownedStateToggle) {
+            if (actor->Is3DLoaded() && !actor->IsInKillMove() && !actor->AsActorState()->IsSwimming()) {
+                if (reactionHandler::recoverDownedState(actor.get())) {
+                    OwnedEffects::remove(actor.get(),OwnedEffects::downed);
+                    state.downed = false;
+                }
+            }
+        }
+        if (!state.cleanup) {
+            if (state.countdown > 0) state.countdown -= delta;
+            else if (state.broken || !actor->IsInCombat()) {
+                state.current = std::min(state.maximum, state.current + delta / 7 * state.maximum);
+                if (state.current >= state.maximum) state.cleanup = true;
+            }
+        }
+        if (state.cleanup) {
+            if (recover(actor.get(), state)) { states.erase(handle); continue; }
+        } else if (flash && state.broken && settings::bUIAlert) {
+            TrueHUDUtils::flashActorValue(actor.get(), RE::ActorValue::kHealth);
+        }
+    }
+    publish();
+    if (states.empty()) ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::stunHandler);
+}
+void stunHandler::damageStun(RE::Actor*, RE::Actor* victim, float amount)
+{
+    if (!victim || !std::isfinite(amount) || amount <= 0) return;
+    const auto handle = victim->GetHandle();
+    auto [it, inserted] = states.try_emplace(handle);
+    auto& state = it->second;
+    if (inserted) {
+        state.maximum = std::max(1.0f, (victim->GetPermanentActorValue(RE::ActorValue::kHealth) +
+            victim->GetPermanentActorValue(RE::ActorValue::kStamina)) / 2);
+        state.current = state.maximum;
+    }
+    state.cleanup = false;
+    state.countdown = 3;
+    state.current = std::max(0.0f, state.current - amount);
+    if (!state.broken && state.current <= 0) {
+        state.broken = true;
+        ValhallaUtils::playSound(victim, data::soundStunBreak);
+        if (settings::bStunMeterToggle) state.meterOwned=TrueHUDUtils::greyOutSpecialMeter(victim);
+    }
+    publish();
+    if (state.broken && settings::bDownedStateToggle && !state.downed && victim->Is3DLoaded() &&
+        !victim->IsInKillMove() && !victim->AsActorState()->IsSwimming() &&
+        (data::isRaceType(victim, data::Humanoid) || data::isRaceType(victim, data::Undead))) {
+        bool alreadyDown = false;
+        victim->GetGraphVariableBool("IsBleedingOut", alreadyDown);
+        if ((alreadyDown && OwnedEffects::contains(victim,OwnedEffects::downed)) ||
+            (!alreadyDown && reactionHandler::triggerDownedState(victim))) { state.downed = true; OwnedEffects::add(victim,OwnedEffects::downed); }
+    }
+    ValhallaCombat::GetSingleton()->activateUpdate(ValhallaCombat::stunHandler);
+}
+void stunHandler::modStun(RE::Actor* actor, float amount)
+{
+    if (!actor || !CombatRuntime::get().ready() || !std::isfinite(amount)) return;
+    if (mutating) {
+        CombatRuntime::get().schedule(0,[handle=actor->GetHandle(),amount] { auto value=handle.get(); if (value) GetSingleton()->modStun(value.get(),amount); });
+        return;
+    }
+    Mutation transaction(*this);
+    const auto it = states.find(actor->GetHandle());
+    if (it == states.end()) return;
+    it->second.current = std::clamp(it->second.current + amount, 0.0f, it->second.maximum);
+    publish();
+}
+void stunHandler::processStunDamage(STUNSOURCE source, RE::TESObjectWEAP* weapon, RE::Actor* aggressor, RE::Actor* victim, float base)
+{
+    if (!CombatRuntime::get().ready() || !settings::bStunToggle || !victim || !aggressor ||
+        !std::isfinite(base) || victim->IsPlayerRef() || (victim->IsPlayerTeammate() && !settings::bFriendlyStunToggle)) return;
+    if (mutating) {
+        const auto form=weapon?weapon->GetFormID():0;
+        CombatRuntime::get().schedule(0,[source,form,a=aggressor->GetHandle(),v=victim->GetHandle(),base] {
+            auto attacker=a.get(),target=v.get();
+            if (attacker && target) GetSingleton()->processStunDamage(source,form?RE::TESForm::LookupByID<RE::TESObjectWEAP>(form):nullptr,attacker.get(),target.get(),base);
+        });
+        return;
+    }
+    Mutation transaction(*this);
+    float damage = 0;
+    switch (source) {
+    case timedBlock: damage = base * settings::fStunTimedBlockMult; break;
+    case bash: damage = aggressor->GetActorValue(RE::ActorValue::kBlock) * settings::fStunBashMult; break;
+    case powerBash: damage = aggressor->GetActorValue(RE::ActorValue::kBlock) * settings::fStunPowerBashMult; break;
+    case parry: damage = aggressor->GetActorValue(RE::ActorValue::kBlock) * settings::fStunParryMult; break;
+    case counterAttack: damage = base * settings::fStunCounterAttackMult; break;
+    case lightAttack:
+    case powerAttack:
+        damage = base * (source == lightAttack ? settings::fStunNormalAttackMult : settings::fStunPowerAttackMult);
+        switch (weapon ? weapon->GetWeaponType() : RE::WEAPON_TYPE::kHandToHandMelee) {
+        case RE::WEAPON_TYPE::kHandToHandMelee: damage *= settings::fStunUnarmedMult; break;
+        case RE::WEAPON_TYPE::kOneHandDagger: damage *= settings::fStunDaggerMult; break;
+        case RE::WEAPON_TYPE::kOneHandSword: damage *= settings::fStunSwordMult; break;
+        case RE::WEAPON_TYPE::kOneHandAxe: damage *= settings::fStunWarAxeMult; break;
+        case RE::WEAPON_TYPE::kOneHandMace: damage *= settings::fStunMaceMult; break;
+        case RE::WEAPON_TYPE::kTwoHandAxe: damage *= settings::fStun2HBluntMult; break;
+        case RE::WEAPON_TYPE::kTwoHandSword: damage *= settings::fStunGreatSwordMult; break;
+        default: break;
+        }
+        break;
+    }
+    if (source == bash || source == powerBash || source == parry) inlineUtils::offsetRealDamage(damage, aggressor, victim);
+    damageStun(aggressor, victim, damage);
+}

@@ -9,6 +9,23 @@
 #include "include/Utils.h"
 #include "include/lib/ValhallaCombatAPI.h"
 #include "include/ModAPI.h"
+#include "include/attackHandler.h"
+#include "include/executionHandler.h"
+#include "include/Menu.h"
+#include "include/OwnedEffects.h"
+void endCombatSession();
+namespace {
+bool hooksInstalled = false;
+class MenuLifecycle final : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+ RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* event,RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override {
+  const bool main=event && event->opening && event->menuName==RE::MainMenu::MENU_NAME;
+  const auto action=[main] { CombatRuntime::get().resetClock(); if (main) endCombatSession(); };
+  if (CombatRuntime::get().ownerThread()) action(); else CombatRuntime::get().control(action);
+  return RE::BSEventNotifyControl::kContinue;
+ }
+};
+MenuLifecycle menuLifecycle;
+}
 void initTrueHUDAPI() {
 	auto val = ValhallaCombat::GetSingleton();
 	val->ersh_TrueHUD = reinterpret_cast<TRUEHUD_API::IVTrueHUD3*>(TRUEHUD_API::RequestPluginAPI(TRUEHUD_API::InterfaceVersion::V3));
@@ -39,13 +56,14 @@ void initPrecisionAPI() {
 
 void onDataLoaded() 
 {
-	Hooks::install();  //hook install has been postponed for compatibility with other plugins.
-
+	CombatRuntime::get().initialize();
 	settings::readSettings();
 	events::registerAllEventHandlers();
+	if (auto ui=RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&menuLifecycle);
 	data::loadData();
 	blockHandler::GetSingleton()->init();
 	blockHandler::EldenCounterCompatibility::attemptInit(); //todo: fix this jank
+	hooksInstalled = Hooks::install();
 }
 
 void onPostLoad() {
@@ -56,9 +74,25 @@ void onPostLoad() {
 }
 
 void onPostLoadGame() {
-	debuffHandler::GetSingleton()->stopDebuff(RE::PlayerCharacter::GetSingleton());
-	stunHandler::GetSingleton()->reset();
+	if (!hooksInstalled) {
+		logger::error("Combat session disabled because hook validation failed");
+		return;
+	}
+	CombatRuntime::get().beginSession();
+	OwnedEffects::update();
 	settings::updateGameSettings();
+}
+
+void endCombatSession()
+{
+	CombatRuntime::get().endSession();
+	debuffHandler::GetSingleton()->reset();
+	stunHandler::GetSingleton()->reset();
+	blockHandler::EldenCounterCompatibility::reset();
+	blockHandler::GetSingleton()->reset();
+	attackHandler::GetSingleton()->reset();
+	executionHandler::GetSingleton()->reset();
+	OwnedEffects::restore();
 }
 
 
@@ -66,6 +100,9 @@ void onPostLoadGame() {
 void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 {
 	switch (a_msg->type) {
+		case SKSE::MessagingInterface::kPostPostLoad:
+			Menu::registerMenu();
+			break;
 	case SKSE::MessagingInterface::kDataLoaded:
 		onDataLoaded();
 		break;
@@ -73,14 +110,21 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 		onPostLoad();
 		break;
 	case SKSE::MessagingInterface::kPostLoadGame:
-		onPostLoadGame();
+				if (a_msg->data != nullptr) onPostLoadGame();
+			else endCombatSession();
 		break;
+		case SKSE::MessagingInterface::kPreLoadGame:
+			endCombatSession();
+			break;
+		case SKSE::MessagingInterface::kNewGame:
+			endCombatSession();
+			onPostLoadGame();
+			break;
 	}
 }
 
 void onSKSEInit()
 {
-	settings::UpdateHandler::Register();
 }
 
 namespace
@@ -176,6 +220,7 @@ extern "C" DLLEXPORT bool  SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)
 	logger::info("{} v{}"sv, Plugin::NAME, Plugin::VERSION.string());
 
 	SKSE::Init(a_skse);
+	OwnedEffects::initialize();
 
 	auto messaging = SKSE::GetMessagingInterface();
 	if (!messaging->RegisterListener("SKSE", MessageHandler)) {

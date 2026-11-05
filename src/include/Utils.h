@@ -1,4 +1,6 @@
 #pragma once
+#include "CombatRuntime.h"
+#include "data.h"
 #include "offsets.h"
 #include "bin/ValhallaCombat.hpp"
 #include "include/lib/robin_hood.h"
@@ -6,7 +8,7 @@
 #include  <random>
 #include  <iterator>
 #define CONSOLELOG(msg) 	RE::ConsoleLog::GetSingleton()->Print(msg);
-#define PI 3.1415926535897932384626
+#define PI 3.14159265358979323846f
 namespace Utils
 {
 	namespace Actor
@@ -95,15 +97,15 @@ namespace inlineUtils
 
 	template<typename Iter, typename RandomGenerator>
 	Iter select_randomly(Iter start, Iter end, RandomGenerator& g) {
-		std::uniform_int_distribution<> dis(0, std::distance(start, end) - 1);
+			if (start == end) return end;
+		std::uniform_int_distribution<typename std::iterator_traits<Iter>::difference_type> dis(0, std::distance(start, end) - 1);
 		std::advance(start, dis(g));
 		return start;
 	}
 
 	template<typename Iter>
 	Iter select_randomly(Iter start, Iter end) {
-		static std::random_device rd;
-		static std::mt19937 gen(rd());
+			static thread_local std::mt19937 gen(std::random_device{}());
 		return select_randomly(start, end, gen);
 	}
 
@@ -113,15 +115,7 @@ namespace inlineUtils
 	@param a_duration: duration of the slow time.
 	@param a_percentage: relative time speed to normal time(1).*/
 	inline void slowTime(float a_duration, float a_percentage) {
-		int duration_milisec = static_cast<int>(a_duration * 1000);
-		RE::Offset::SGTM(a_percentage);
-		/*Reset time here*/
-		auto resetSlowTime = [](int a_duration) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(a_duration));
-			RE::Offset::SGTM(1);
-		};
-		std::jthread resetThread(resetSlowTime, duration_milisec);
-		resetThread.detach();
+			CombatRuntime::get().slowTime(a_duration, a_percentage);
 	}
 
 	/*Calculate the real hit damage based on game difficulty settings, and whether the player is aggressor/victim,
@@ -190,15 +184,16 @@ namespace TrueHUDUtils
 		ersh->RevertBarColor(a_actor->GetHandle(), actorValue, TRUEHUD_API::BarColorType::PhantomColor);
 	}
 
-	inline void greyOutSpecialMeter(RE::Actor* a_actor) {
+		inline bool greyOutSpecialMeter(RE::Actor* a_actor) {
 		if (!settings::facts::TrueHudAPI_Obtained || !settings::facts::TrueHudAPI_HasSpecialBarControl) {
-			return;
+				return false;
 		}
 		auto ersh = ValhallaCombat::GetSingleton()->ersh_TrueHUD;
 		ersh->OverrideSpecialBarColor(a_actor->GetHandle(), TRUEHUD_API::BarColorType::FlashColor, 0xd72a2a);
 		ersh->OverrideSpecialBarColor(a_actor->GetHandle(), TRUEHUD_API::BarColorType::BarColor, 0x7d7e7d);
 		ersh->OverrideSpecialBarColor(a_actor->GetHandle(), TRUEHUD_API::BarColorType::PhantomColor, 0xb30d10);
 		ersh->OverrideBarColor(a_actor->GetHandle(), RE::ActorValue::kHealth, TRUEHUD_API::BarColorType::FlashColor, 0xd72a2a);
+			return true;
 	}
 
 	inline void revertSpecialMeter(RE::Actor* a_actor) {
@@ -282,7 +277,7 @@ public:
 		auto a_weapon = Utils::Actor::getWieldingWeapon(aggressor);
 		if (a_weapon) {
 			//DEBUG("weapon to clamp damage: {}", a_weapon->GetName());
-			dmg = min(dmg, a_weapon->GetAttackDamage());
+				dmg = std::min(dmg, static_cast<float>(a_weapon->GetAttackDamage()));
 		}
 	}
 
@@ -299,24 +294,23 @@ public:
 		return false;
 	}
 
-	/*Set the projectile's cause to a new actor; reset the projectile's collision mask.
-	@param a_projectile: projectile to be reset.
-	@param a_actor: new owner of the projectile.
-	@param a_projectile_collidable: pointer to the projectile collidable to rset its collision mask.*/
-	static void resetProjectileOwner(RE::Projectile* a_projectile, RE::Actor* a_actor, RE::hkpCollidable* a_projectile_collidable) {
+		static void resetProjectileOwner(RE::Projectile* a_projectile, RE::Actor* a_actor) {
 		if (!a_projectile || !a_actor) {
 			return;
 		}
 		a_projectile->SetActorCause(a_actor->GetActorCause());
 		a_projectile->GetProjectileRuntimeData().shooter = a_actor->GetHandle();
-		if (!a_projectile_collidable) {
-			// Deferred deflect path: Havok collidable from the 190 iteration is gone.
-			// Owner/shooter above is enough; filter fix is skipped rather than crashing.
-			return;
-		}
-		RE::CFilter actorFilter;
+			RE::CFilter actorFilter{};
 		a_actor->GetCollisionFilterInfo(actorFilter);
-		auto& collisionFilterInfo = a_projectile_collidable->broadPhaseHandle.collisionFilterInfo.filter;
+			auto cell=a_projectile->GetParentCell();
+			auto world=cell?cell->GetbhkWorld():nullptr;
+			if (!world) return;
+			RE::BSWriteLockGuard lock(world->worldLock);
+			auto body=a_projectile->GetProjectileRuntimeData().unk0E0;
+			if (!body || !body->phantom) return;
+			auto phantom=body->phantom;
+			if (phantom->world!=world->GetWorld1()) return;
+			auto& collisionFilterInfo = phantom->GetCollidableRW()->broadPhaseHandle.collisionFilterInfo.filter;
 		collisionFilterInfo &= (0x0000FFFF);
 		collisionFilterInfo |= (actorFilter.filter << 16);
 	}
@@ -383,9 +377,9 @@ public:
 				float t1 = 0.5f * (-b - uglyNumber) / a;
 
 				// Assign the lowest positive time to t to aim at the earliest hit
-				t = min(t0, t1);
+				t = std::min(t0, t1);
 				if (t < FLT_EPSILON) {
-					t = max(t0, t1);
+					t = std::max(t0, t1);
 				}
 
 				if (t < FLT_EPSILON) {
@@ -446,7 +440,7 @@ public:
 	/*Get the body position of this actor.*/
 	static void getBodyPos(RE::Actor* a_actor, RE::NiPoint3& pos)
 	{
-		if (!a_actor->GetActorRuntimeData().race) {
+			if (!a_actor || !a_actor->GetActorRuntimeData().race || !a_actor->GetActorRuntimeData().race->bodyPartData) {
 			return;
 		}
 		RE::BGSBodyPart* bodyPart = a_actor->GetActorRuntimeData().race->bodyPartData->parts[0];
@@ -468,10 +462,10 @@ public:
 	/// <param name="a_target">New target to be aimed at.</param>
 	static void RetargetProjectile(RE::Projectile* a_projectile, RE::TESObjectREFR* a_target)
 	{
+			if (!a_projectile || !a_target) return;
+			auto projectileNode = a_projectile->Get3D2();
+			if (!projectileNode) return;
 		a_projectile->GetProjectileRuntimeData().desiredTarget = a_target;
-
-		auto projectileNode = a_projectile->Get3D2();
-		auto targetHandle = a_target->GetHandle();
 
 		RE::NiPoint3 targetPos = a_target->GetPosition();
 
@@ -479,18 +473,18 @@ public:
 			getBodyPos(a_target->As<RE::Actor>(), targetPos);
 		}
 
-		RE::NiPoint3 targetVelocity;
-		targetHandle.get()->GetLinearVelocity(targetVelocity);
+			RE::NiPoint3 targetVelocity{};
+			a_target->GetLinearVelocity(targetVelocity);
 
 		float projectileGravity = 0.f;
 		if (auto ammo = a_projectile->GetProjectileRuntimeData().ammoSource) {
 			if (auto bgsProjectile = ammo->data.projectile) {
 				projectileGravity = bgsProjectile->data.gravity;
-				if (auto bhkWorld = a_projectile->parentCell->GetbhkWorld()) {
+					if (auto bhkWorld = a_projectile->parentCell ? a_projectile->parentCell->GetbhkWorld() : nullptr) {
 					if (auto hkpWorld = bhkWorld->GetWorld1()) {
 						auto vec4 = hkpWorld->gravity;
 						float quad[4];
-						_mm_store_ps(quad, vec4.quad);
+							_mm_storeu_ps(quad, vec4.quad);
 						float gravity = -quad[2] * *RE::Offset::g_worldScaleInverse;
 						projectileGravity *= gravity;
 					}
@@ -527,7 +521,7 @@ namespace DtryUtils
 	private:
 		RE::BSFixedString _pluginName;
 		RE::TESDataHandler* _dataHandler;
-		int _loadedForms;
+		int _loadedForms{0};
 
 	public:
 		formLoader(RE::BSFixedString pluginName)
@@ -537,7 +531,7 @@ namespace DtryUtils
 			if (!_dataHandler) {
 				logger::critical("Error: TESDataHandler not found.");
 			}
-			if (!_dataHandler->LookupModByName(pluginName)) {
+			if (_dataHandler && !_dataHandler->LookupModByName(pluginName)) {
 				logger::critical("Error: {} not found.", pluginName);
 			}
 			logger::info("Loading from plugin {}...", pluginName);
@@ -552,7 +546,7 @@ namespace DtryUtils
 		template <class formType>
 		void load(formType*& formRet, RE::FormID formID)
 		{
-			formRet = _dataHandler->LookupForm<formType>(formID, _pluginName);
+			formRet = _dataHandler ? _dataHandler->LookupForm<formType>(formID, _pluginName) : nullptr;
 			if (!formRet) {
 				logger::critical("Error: null formID or wrong form type when loading {} from {}", formID, _pluginName);
 			}
@@ -565,8 +559,8 @@ namespace DtryUtils
 	{
 	private:
 		std::shared_ptr<CSimpleIniA> _ini;
-		const char* _section;
-		int _loadedSettings;
+		const char* _section{nullptr};
+		int _loadedSettings{0};
 		const char* _settingsFile;
 	public:
 		settingsLoader(const char* settingsFile)

@@ -4,13 +4,14 @@
 #include "include/executionHandler.h"
 #include "include/stunHandler.h"
 #include "include/blockHandler.h"
+#include "include/CombatRuntime.h"
+#include "include/Menu.h"
 using EventType = RE::INPUT_EVENT_TYPE;
 using DeviceType = RE::INPUT_DEVICE;
-const auto ui = RE::UI::GetSingleton();
 
 EventResult inputEventHandler::ProcessEvent(RE::InputEvent* const* a_event, RE::BSTEventSource<RE::InputEvent*>*)
 {
-	if (!a_event || RE::UI::GetSingleton()->GameIsPaused()) {
+	if (Menu::capturing() || !CombatRuntime::get().ready() || !a_event || !RE::UI::GetSingleton() || RE::UI::GetSingleton()->GameIsPaused()) {
 		return EventResult::kContinue;
 	}
 
@@ -35,13 +36,13 @@ EventResult inputEventHandler::ProcessEvent(RE::InputEvent* const* a_event, RE::
 			default:
 				continue;
 			}
-			if (key == settings::iExecutionKey) {
+			if (settings::iExecutionKey >= 0 && key == static_cast<std::uint32_t>(settings::iExecutionKey)) {
 				if (button->IsDown()) {
 					executionHandler::GetSingleton()->tryPcExecution();
 				}
 				break;
 			}
-			if (key == settings::iAltBlockKey) {
+			if (settings::iAltBlockKey >= 0 && key == static_cast<std::uint32_t>(settings::iAltBlockKey)) {
 				if (button->IsDown()) {
 					if (settings::bTimedBlockToggle || settings::bTimedBlockProjectileToggle) {
 						blockHandler::GetSingleton()->onBlockKeyDown();
@@ -51,9 +52,7 @@ EventResult inputEventHandler::ProcessEvent(RE::InputEvent* const* a_event, RE::
 					}
 				}
 				else if (button->IsUp()) {
-					if (settings::bTimedBlockToggle || settings::bTimedBlockProjectileToggle) {
-						blockHandler::GetSingleton()->onBlockKeyUp();
-					}
+					blockHandler::GetSingleton()->onBlockKeyUp();
 					
 				}
 			}

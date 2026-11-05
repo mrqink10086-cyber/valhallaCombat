@@ -3,131 +3,81 @@
 #include "include/settings.h"
 #include "include/offsets.h"
 #include "include/Utils.h"
-#include "valhallaCombat.hpp"
-using uniqueLocker = std::unique_lock<std::shared_mutex>;
-using sharedLocker = std::shared_lock<std::shared_mutex>;
-/*Called every frame.
-Iterate through the set of actors debuffing.
-Check the actors' stamina. If the actor's stamina has fully recovered, remove the actor from the set.
-Check the actor's UI counter, if the counter is less than 0, flash the actor's UI.*/
-void debuffHandler::update() {
+#include "ValhallaCombat.hpp"
+#include "include/OwnedEffects.h"
 
-	uniqueLocker lock(mtx_actorInDebuff);
-	if (actorInDebuff.empty()) {
-		ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::debuffHandler);
-	}
-	auto it = actorInDebuff.begin();
-	while (it != actorInDebuff.end()) {
-		auto handle = *it;
-		if (!handle) {
-			it = actorInDebuff.erase(it);  //erase actor from debuff set.
-			continue;
-		}
-		auto actor = handle.get().get();
-		if (!actor) {
-			it = actorInDebuff.erase(it);  //erase actor from debuff set.
-			continue;
-		}
-		if (actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kStamina) >= 
-			actor->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina) 
-			+ actor->GetActorValueModifier(RE::ACTOR_VALUE_MODIFIER::kTemporary, RE::ActorValue::kStamina)) { //offset max stamina based on modifier
-			revertDebuffUI(actor);
-			it = actorInDebuff.erase(it);
-			if (actor->IsPlayerRef()) {
-				Utils::Actor::safeRemovePerk(data::debuffPerk, actor);
-			}
-			continue;
-		}
-		++it;
-	}	
+void debuffHandler::update(float delta)
+{
+    std::vector<RE::ActorHandle> handles;
+    { std::shared_lock lock(mtx_actorInDebuff); handles.assign(actorInDebuff.begin(), actorInDebuff.end()); }
+    if (delta < 0) delta = std::max(0.0f, *RE::Offset::g_deltaTime);
+    flashCountdown -= delta==0?0:CombatRuntime::get().activeDelta();
+    const bool flash = flashCountdown <= 0;
+    if (flash) flashCountdown = 0.5f;
+    for (const auto handle : handles) {
+        auto actor = handle.get();
+        if (!actor) { std::unique_lock lock(mtx_actorInDebuff); actorInDebuff.erase(handle); ownedPerks.erase(handle); ownedUI.erase(handle); continue; }
+        const float maximum = actor->GetPermanentActorValue(RE::ActorValue::kStamina) +
+            actor->GetActorValueModifier(RE::ACTOR_VALUE_MODIFIER::kTemporary, RE::ActorValue::kStamina);
+        if (!settings::bStaminaDebuffToggle || Utils::Actor::isDead(actor.get()) || actor->GetActorValue(RE::ActorValue::kStamina) >= maximum) {
+            stopDebuff(actor.get()); continue;
+        }
+        if (settings::bUIAlert && !ownedUI.contains(handle)) initDebuffUI(actor.get());
+        else if (!settings::bUIAlert && ownedUI.contains(handle)) revertDebuffUI(actor.get());
+        if (flash && settings::bUIAlert && actor->IsPlayerRef()) TrueHUDUtils::flashActorValue(actor.get(), RE::ActorValue::kStamina);
+    }
+    { std::shared_lock lock(mtx_actorInDebuff);
+      if (actorInDebuff.empty()) ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::debuffHandler); }
 }
-
-
-void debuffHandler::initStaminaDebuff(RE::Actor* a_actor) {	
-	if (!settings::bStaminaDebuffToggle) {
-		return;
-	}
-	RE::ActorHandle handle = a_actor->GetHandle();
-	{
-		uniqueLocker lock(mtx_actorInDebuff);
-		auto it = actorInDebuff.find(handle);
-		if (it != actorInDebuff.end()) {
-			return;
-		}
-		actorInDebuff.insert(handle);	
-	}
-
-	if (a_actor->IsPlayerRef()) {
-		Utils::Actor::safeApplyPerk(data::debuffPerk, a_actor);
-	}
-
-	a_actor->SetGraphVariableBool(gv_bExhausted, true);
-	if (settings::bUIAlert) {
-		initDebuffUI(a_actor);
-	}
-
-	ValhallaCombat::GetSingleton()->activateUpdate(ValhallaCombat::HANDLER::debuffHandler);
+void debuffHandler::initStaminaDebuff(RE::Actor* actor)
+{
+    if (!actor || !CombatRuntime::get().ready() || !settings::bStaminaDebuffToggle) return;
+    const auto handle = actor->GetHandle();
+    { std::unique_lock lock(mtx_actorInDebuff); if (!actorInDebuff.insert(handle).second) return; }
+    if (actor->IsPlayerRef() && data::debuffPerk && (!actor->HasPerk(data::debuffPerk) || OwnedEffects::contains(actor,OwnedEffects::perk))) {
+        if (!actor->HasPerk(data::debuffPerk)) Utils::Actor::safeApplyPerk(data::debuffPerk, actor);
+        if (actor->HasPerk(data::debuffPerk)) { ownedPerks.insert(handle); OwnedEffects::add(actor,OwnedEffects::perk); }
+    }
+    bool exhausted=false; actor->GetGraphVariableBool(gv_bExhausted,exhausted);
+    if ((exhausted && OwnedEffects::contains(actor,OwnedEffects::exhausted)) ||
+        (!exhausted && actor->SetGraphVariableBool(gv_bExhausted, true))) { ownedGraphs.insert(handle); OwnedEffects::add(actor,OwnedEffects::exhausted); }
+    if (settings::bUIAlert) initDebuffUI(actor);
+    ValhallaCombat::GetSingleton()->activateUpdate(ValhallaCombat::debuffHandler);
 }
-
-void debuffHandler::initDebuffUI(RE::Actor* a_actor) {
-	TrueHUDUtils::greyoutAvMeter(a_actor, RE::ActorValue::kStamina);
-	if (a_actor->IsPlayerRef() && !async_pcStaminaMeterFlash_b) {
-		std::jthread t(async_pcStaminaMeterFlash);
-		t.detach();
-		async_pcStaminaMeterFlash_b = true;
-	}
+void debuffHandler::initDebuffUI(RE::Actor* actor)
+{
+    if (!actor) return;
+    TrueHUDUtils::greyoutAvMeter(actor, RE::ActorValue::kStamina);
+    ownedUI.insert(actor->GetHandle());
 }
-
-
-void debuffHandler::revertDebuffUI(RE::Actor* a_actor) {
-	if (!settings::bUIAlert) {
-		return;
-	}
-	if (a_actor->IsPlayerRef()) {
-		async_pcStaminaMeterFlash_b = false;
-	}
-	TrueHUDUtils::revertAvMeter(a_actor, RE::ActorValue::kStamina);
+void debuffHandler::revertDebuffUI(RE::Actor* actor)
+{
+    if (actor && ownedUI.erase(actor->GetHandle())) TrueHUDUtils::revertAvMeter(actor, RE::ActorValue::kStamina);
 }
-
-void debuffHandler::stopDebuff(RE::Actor* a_actor) {
-	auto handle = a_actor->GetHandle();
-	{
-		uniqueLocker lock(mtx_actorInDebuff);
-		auto it = actorInDebuff.find(handle);
-		if (it == actorInDebuff.end()) {
-			return;
-		}
-		actorInDebuff.erase(it);
-	}
-	
-	revertDebuffUI(a_actor);
-
-	if (a_actor->IsPlayerRef()) {
-		Utils::Actor::safeRemovePerk(data::debuffPerk, a_actor);
-	}
-
-	a_actor->SetGraphVariableBool(gv_bExhausted, false);
+void debuffHandler::stopDebuff(RE::Actor* actor)
+{
+    if (!actor) return;
+    const auto handle = actor->GetHandle();
+    { std::unique_lock lock(mtx_actorInDebuff); actorInDebuff.erase(handle); }
+    revertDebuffUI(actor);
+    if (ownedPerks.erase(handle)) { Utils::Actor::safeRemovePerk(data::debuffPerk, actor); OwnedEffects::remove(actor,OwnedEffects::perk); }
+    if (ownedGraphs.erase(handle)) {
+        if (actor->SetGraphVariableBool(gv_bExhausted, false)) OwnedEffects::remove(actor,OwnedEffects::exhausted);
+        else OwnedEffects::retry(actor,OwnedEffects::exhausted);
+    }
 }
-
-	
-
-bool debuffHandler::isInDebuff(RE::Actor* a_actor) {
-	sharedLocker lock(mtx_actorInDebuff);
-	auto handle = a_actor->GetHandle();
-	return actorInDebuff.contains(handle);
+void debuffHandler::reset()
+{
+    std::vector<RE::ActorHandle> handles;
+    { std::shared_lock lock(mtx_actorInDebuff); handles.assign(actorInDebuff.begin(), actorInDebuff.end()); }
+    for (const auto handle : handles) { auto actor = handle.get(); if (actor) stopDebuff(actor.get()); }
+    { std::unique_lock lock(mtx_actorInDebuff); actorInDebuff.clear(); }
+    ownedPerks.clear(); ownedUI.clear(); ownedGraphs.clear(); flashCountdown = 0;
 }
-
- 
-
-
-void debuffHandler::async_pcStaminaMeterFlash() {
-	while (true) {
-		if (async_pcStaminaMeterFlash_b) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
-			TrueHUDUtils::flashActorValue(RE::PlayerCharacter::GetSingleton(), RE::ActorValue::kStamina);
-		}
-		else {
-			return;
-		}
-	}
+bool debuffHandler::isInDebuff(RE::Actor* actor)
+{
+    if (!actor) return false;
+    const auto handle = actor->GetHandle();
+    std::shared_lock lock(mtx_actorInDebuff);
+    return actorInDebuff.contains(handle);
 }

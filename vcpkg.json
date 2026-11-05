@@ -3,12 +3,10 @@
   "version": "1",
   "dependencies": [
     "directxtk",
-    "fast-cpp-csv-parser",
-    "rsm-binary-io",
     "simpleini",
     "spdlog",
     "xbyak",
     "rapidcsv"
   ],
-  "builtin-baseline": "74e6536215718009aae747d86d84b78376bf9e09"
+  "builtin-baseline": "ee12231b20c95013c6638d845d04c91559a1d1ff"
 }

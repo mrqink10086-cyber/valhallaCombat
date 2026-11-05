@@ -1,0 +1,4 @@
+Case: worker; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+Exit 0 confirms observations reproduced; it does not mean defects fixed
+elden_counter_remove_spell: on_worker=1 on_main=0

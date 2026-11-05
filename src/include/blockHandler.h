@@ -2,6 +2,7 @@
 #include "lib/robin_hood.h"
 #include "lib/PrecisionAPI.h"
 #include <mutex>
+#include <atomic>
 /*Handling block stamina damage and perfect blocking.
 All timed block features are only usable by player at this point.*/
 class blockHandler {
@@ -13,6 +14,8 @@ public:
 	}
 
 	void init();
+		void reset();
+		std::uint64_t keyGeneration() const { return blockGeneration; }
 
 	void update();
 
@@ -41,6 +44,8 @@ public:
 
 	
 private:
+    std::unordered_set<RE::ObjectRefHandle> pendingProjectiles;
+    void projectileBlockEffects(RE::Actor* actor, float experience);
 	enum blockWindowPenaltyLevel {
 		none = 0,
 		light, //70% of regular timing
@@ -60,17 +65,18 @@ private:
 	bool isPcTackling = false;
 	bool isPcTackleCooldown = false;
 	
-	bool isPcHot = false;
+		std::atomic<bool> isPcHot{false};
 	float pcHotTimer = 3.f;
-	uint32_t pcPerfectBlockCountdown = 0;
+		std::atomic<uint32_t> pcPerfectBlockCountdown{0};
 
 	float pcTackleTimer = 0;
 	float pcTackleCooldownTimer = 0;
 	
-	bool isPcTimedBlocking;
+		std::atomic<bool> isPcTimedBlocking{false};
 	bool isPcBlockingCoolDown;
 	bool isPcTimedBlockSuccess;
 	bool isBlockButtonPressed;
+		std::uint64_t blockGeneration{0};
 
 	void onPcTimedBlockEnd();
 
@@ -196,12 +202,16 @@ public: // plz don't look at this ugly compatiblity thing
 	public:
 		static void attemptInit();
 		static void triggerCounter(RE::Actor* a_actor);
+			static RE::SpellItem* triggerSpell() { return ec_triggerSpell; }
+			static void reset();
 		static inline bool on = false;
 
 	private:
 		static inline RE::SpellItem* ec_triggerSpell = nullptr;
 
 		static inline float ec_Time = 1;
+			static inline std::unordered_map<RE::ActorHandle,std::uint64_t> ownedActors;
+			static inline std::uint64_t generation{0};
 
 		static inline void async_removeECTriggerSpell(RE::Actor* a_actor);
 		static void readSettings();

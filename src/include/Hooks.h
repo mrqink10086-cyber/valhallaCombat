@@ -207,9 +207,9 @@ namespace Hooks
 		};
 
 	private:
-		static void OnArrowCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector);
+			static bool OnArrowCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector);
 
-		static void OnMissileCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector);
+			static bool OnMissileCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector);
 		static inline REL::Relocation<decltype(OnArrowCollision)> _arrowCollission;
 		static inline REL::Relocation<decltype(OnMissileCollision)> _missileCollission;
 	};
@@ -279,9 +279,28 @@ namespace Hooks
 	};
 
 
-	static void install()
+		static bool install()
 	{
 		logger::info("Installing hooks...");
+			const std::array sites{
+				REL::Relocation<std::uintptr_t>{RELOCATION_ID(37650, 38603)}.address() + RELOCATION_OFFSET(0x16E, 0x171),
+				REL::Relocation<std::uintptr_t>{RELOCATION_ID(37510, 38452)}.address() + RELOCATION_OFFSET(0x176, 0xE1),
+				REL::Relocation<std::uintptr_t>{RELOCATION_ID(37673, 38627)}.address() + RELOCATION_OFFSET(0x3C0, 0x4A8),
+				REL::Relocation<std::uintptr_t>{RELOCATION_ID(37650, 38603)}.address() + RELOCATION_OFFSET(0x38B, 0x45A),
+				REL::Relocation<std::uintptr_t>{RELOCATION_ID(48139, 49170)}.address() + RELOCATION_OFFSET(0x4D7, 0x435)};
+			for (auto site : sites) {
+				if (*reinterpret_cast<const std::uint8_t*>(site) != 0xE8) {
+					logger::error("Hook callsite mismatch at {:#x}; combat hooks were not installed", site);
+					return false;
+				}
+			}
+			if (REL::Module::IsSE()) {
+				const auto site = REL::Relocation<std::uintptr_t>{REL::ID(37376)}.address() + 0x23;
+				if (*reinterpret_cast<const std::uint8_t*>(site) != 0xE8) {
+					logger::error("GetWantBlock callsite mismatch at {:#x}; combat hooks were not installed", site);
+					return false;
+				}
+			}
 		SKSE::AllocTrampoline(1 << 8);
 		Hook_OnGetAttackStaminaCost::install();
 		//Hook_OnCheckStaminaRegenCondition::install(); //todo: fix this hook
@@ -294,6 +313,7 @@ namespace Hooks
 		Hook_GetWantBlock::install();
 		Hook_AttackBlockHandler_OnProcessButton::install();
 		logger::info("...done");
+			return true;
 	}
 }
 

@@ -1,0 +1,5 @@
+Case: selection; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+control_valid_only: PASS
+valid_target_after_dead_candidate: FAIL (attempts=0, expected=1)
+valid_target_after_unloaded_candidate: FAIL (attempts=0, expected=1)

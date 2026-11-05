@@ -1,11 +1,9 @@
-set(CPACK_PACKAGE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/packaging")
-set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}")
-set(CPACK_VERBATIM_VARIABLES ON)
-
-set(CPACK_GENERATOR "ZIP")
-set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-
-get_cmake_property(CPACK_COMPONENTS_ALL COMPONENTS)
-list(REMOVE_ITEM CPACK_COMPONENTS_ALL "Unspecified")
-
-include(CPack)
+set(VALHALLA_UPSTREAM_ASSETS "" CACHE FILEPATH "Verified v0.2.0-NG release archive for complete mod packaging")
+if(VALHALLA_UPSTREAM_ASSETS)
+ find_package(Python3 REQUIRED COMPONENTS Interpreter)
+ add_custom_target(package_mod
+  COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package.py"
+   --assets "${VALHALLA_UPSTREAM_ASSETS}" --dll "$<TARGET_FILE:${PROJECT_NAME}>"
+   --output "${CMAKE_BINARY_DIR}/packaging/ValhallaCombat-${PROJECT_VERSION}-MenuFramework.zip"
+  DEPENDS "${PROJECT_NAME}" VERBATIM)
+endif()

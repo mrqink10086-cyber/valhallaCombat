@@ -1,0 +1,6 @@
+Case: flow; selected source function bodies are unchanged
+Boundary: controlled engine substitutes; no game runtime
+auto_breaking_hit: broken=1 attempts=0 (current rule: no same-hit attempt)
+auto_following_hit: attempts=1 (control: expected=1)
+auto_breaking_bash: broken=1 attempts=0
+auto_following_bash: attempts=0 (bash path returns before auto check)

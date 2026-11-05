@@ -13,6 +13,7 @@ namespace Hooks
 	float Hook_OnGetAttackStaminaCost::getAttackStaminaCost(RE::ActorValueOwner* avOwner, RE::BGSAttackData* atkData)
 	{
 		RE::Actor* a_actor = Utils::AvOwner::asActor(avOwner);
+			if (!CombatRuntime::get().ready() || !a_actor) return _getAttackStaminaCost(avOwner,atkData);
 		if (!settings::bNonCombatStaminaCost && !a_actor->IsInCombat()) {
 			return 0;
 		}
@@ -41,6 +42,7 @@ used to block stamina regen in certain situations.*/
 
 	void Hook_OnRestoreActorValue::RestoreActorValue(RE::Actor* a_actor, RE::ActorValue a_actorValue, float a_val)
 	{
+			if (!CombatRuntime::get().ready() || !a_actor) { _RestoreActorValue(a_actor,a_actorValue,a_val); return; }
 		switch (a_actorValue) {
 		case RE::ActorValue::kStamina:
 			if (a_actor->IsBlocking()) {
@@ -83,12 +85,12 @@ used to block stamina regen in certain situations.*/
 	void Hook_OnMeleeHit::processHit(RE::Actor* victim, RE::HitData& hitData)
 	{
 		using HITFLAG = RE::HitData::Flag;
-		auto aggressor = hitData.aggressor.get().get();
-		if (!victim || !aggressor || Utils::Actor::isDead(victim)) {
+			auto aggressor = hitData.aggressor.get();
+			if (!CombatRuntime::get().ready() || !victim || !aggressor || Utils::Actor::isDead(victim)) {
 			_ProcessHit(victim, hitData);
 			return;
 		}
-		hitProcessor::GetSingleton()->processHit(aggressor, victim, hitData);
+			hitProcessor::GetSingleton()->processHit(aggressor.get(), victim, hitData);
 		_ProcessHit(victim, hitData);
 	}
 
@@ -123,11 +125,7 @@ used to block stamina regen in certain situations.*/
 	}
 	inline bool shouldIgnoreHit(RE::Projectile* a_projectile, RE::hkpAllCdPointCollector* a_AllCdPointCollector)
 	{
-		// Defensive: never mutate Havok state while the engine is iterating hits.
-		// Only inspect here; actual deflect/destroy is deferred to blockHandler (see destroyProjectile).
-		// This keeps Valhalla transparent in the Ricochet(outer) -> Valhalla -> CIF(inner) vfunc 190 chain
-		// unless a real player/forced block happens.
-		if (!a_projectile || !a_AllCdPointCollector) {
+			if (!CombatRuntime::get().ready() || !a_projectile || !a_AllCdPointCollector) {
 			return false;
 		}
 		if (!IsProjectileSafeToInspect(a_projectile)) {
@@ -141,44 +139,45 @@ used to block stamina regen in certain situations.*/
 			auto refrB = RE::TESHavokUtilities::FindCollidableRef(*hit.rootCollidableB);
 			if (refrA && refrA->formType == RE::FormType::ActorCharacter) {
 				if (auto* actorA = refrA->As<RE::Actor>(); actorA && actorA->Is3DLoaded() && !Utils::Actor::isDead(actorA)) {
-					return blockHandler::GetSingleton()->processProjectileBlock(actorA, a_projectile, const_cast<RE::hkpCollidable*>(hit.rootCollidableB));
+						if (blockHandler::GetSingleton()->processProjectileBlock(actorA, a_projectile, const_cast<RE::hkpCollidable*>(hit.rootCollidableB))) return true;
 				}
 			}
 			if (refrB && refrB->formType == RE::FormType::ActorCharacter) {
 				if (auto* actorB = refrB->As<RE::Actor>(); actorB && actorB->Is3DLoaded() && !Utils::Actor::isDead(actorB)) {
-					return blockHandler::GetSingleton()->processProjectileBlock(actorB, a_projectile, const_cast<RE::hkpCollidable*>(hit.rootCollidableA));
+						if (blockHandler::GetSingleton()->processProjectileBlock(actorB, a_projectile, const_cast<RE::hkpCollidable*>(hit.rootCollidableA))) return true;
 				}
 			}
 		}
 		return false;
 	}
-	void Hook_OnProjectileCollision::OnArrowCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector)
+		bool Hook_OnProjectileCollision::OnArrowCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector)
 	{
 		//DEBUG("hooked arrow collission vfunc");
 		if (!a_this || !a_AllCdPointCollector) {
-			return;
+				return false;
 		}
 		if (shouldIgnoreHit(a_this, a_AllCdPointCollector)) {
-			return;
+				return true;
 		};
-		_arrowCollission(a_this, a_AllCdPointCollector);
+			return _arrowCollission(a_this, a_AllCdPointCollector);
 	};
 
-	void Hook_OnProjectileCollision::OnMissileCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector)
+		bool Hook_OnProjectileCollision::OnMissileCollision(RE::Projectile* a_this, RE::hkpAllCdPointCollector* a_AllCdPointCollector)
 	{
 		//DEBUG("hooked missile collission vfunc");
 		if (!a_this || !a_AllCdPointCollector) {
-			return;
+				return false;
 		}
 		if (shouldIgnoreHit(a_this, a_AllCdPointCollector)) {
-			return;
+				return true;
 		};
-		_missileCollission(a_this, a_AllCdPointCollector);
+			return _missileCollission(a_this, a_AllCdPointCollector);
 	}
 #pragma endregion
 
 	void Hook_OnMeleeCollision::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, std::int64_t a_int1, bool a_bool, void* a_unkptr)
 	{
+			if (!CombatRuntime::get().ready() || !a_aggressor || !a_victim) { _ProcessHit(a_aggressor,a_victim,a_int1,a_bool,a_unkptr); return; }
 		if (settings::bTimedBlockToggle && blockHandler::GetSingleton()->processMeleeTimedBlock(a_victim, a_aggressor, blockHandler::GetSingleton()->getIsForcedTimedBlocking(a_victim), blockHandler::GetSingleton()->getIsForcedPerfectBlocking(a_victim))) {
 			return;
 		}
@@ -191,7 +190,7 @@ used to block stamina regen in certain situations.*/
 	/*Check if the attack action should be performed depending on the actor's debuff state.*/
 	bool Hook_OnAttackAction::PerformAttackAction(RE::TESActionData* a_actionData)
 	{
-		if (!settings::bStaminaDebuffToggle) {
+			if (!CombatRuntime::get().ready() || !a_actionData || !settings::bStaminaDebuffToggle) {
 			return _PerformAttackAction(a_actionData);
 		}
 		auto ref = a_actionData->source.get();
@@ -210,50 +209,40 @@ used to block stamina regen in certain situations.*/
 	}
 
 
-	static void unblock_delayed_threadfunc(RE::AttackBlockHandler* a_this, RE::ButtonEvent* a_event, RE::PlayerControlsData* a_data, float a_time) 
-	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(a_time * 1000))); // wait for, by default, 0.3 sec
-		SKSE::GetTaskInterface()->AddTask(
-			[a_this, a_event, a_data]() 
-			{
-				auto player = RE::PlayerCharacter::GetSingleton();
-				if (player && !blockHandler::GetSingleton()->isBlockKeyHeld() && (player->IsBlocking() || player->AsActorState()->GetAttackState() == RE::ATTACK_STATE_ENUM::kBash) || player->AsActorState()->IsStaggered()) {
-					if (a_event) {
-						a_this->ProcessButton(a_event, a_data);
-					}
-				}
-				if (a_event) {
-					delete (a_event);
-				}
-				player->NotifyAnimationGraph("blockStop"); // just in case
-			});
-	}
 	void Hook_AttackBlockHandler_OnProcessButton::ProcessButton(RE::AttackBlockHandler* a_this, RE::ButtonEvent* a_event, RE::PlayerControlsData* a_data)
 	{
+		if (!CombatRuntime::get().ready() || !a_event) { _ProcessButton(a_this, a_event, a_data); return; }
 		if (a_event->QUserEvent() == "Left Attack/Block") {
 			blockHandler* blockHandler = blockHandler::GetSingleton();
 			if (a_event->IsDown()) {
-				if (settings::bTimedBlockToggle || settings::bTimedBlockProjectileToggle) {
-					blockHandler->onBlockKeyDown();
-				}
+				blockHandler->onBlockKeyDown();
 				if (settings::bTackleToggle) {
 					blockHandler->onTackleKeyDown();
 				}
 			} else if (a_event->IsUp()) {
-				if (settings::bTimedBlockToggle || settings::bTimedBlockProjectileToggle) {
-					blockHandler->onBlockKeyUp();
-				}
+				blockHandler->onBlockKeyUp();
 				if (settings::bBlockCommitmentToggle) {/* Block commitment; Immediately releasing the block key after pressing it will not cause the actor to immediately unblock.*/
 					float delay_time = settings::fBlockCommitmentTime - a_event->HeldDuration();
 					//blockCommitment::GetSingleton()->queueUnblock(delay_time);
 					auto pc = RE::PlayerCharacter::GetSingleton();
 					if (pc && pc->IsBlocking() && a_event->HeldDuration() < settings::fBlockCommitmentTime) { //do not process this request until later
-						RE::ButtonEvent* releaseEvent = RE::ButtonEvent::Create(a_event->GetDevice(), "forceRelease", a_event->GetIDCode(), a_event->Value(), a_event->HeldDuration());  // event to unblock, will be fired later.
-						if (releaseEvent) {
-							std::jthread t(unblock_delayed_threadfunc, a_this, releaseEvent, a_data, delay_time);
-							t.detach();
-							return; //discard the event
-						}
+						const auto generation = blockHandler->keyGeneration();
+						const auto device = a_event->GetDevice();
+						const auto code = a_event->GetIDCode();
+						const auto duration = a_event->HeldDuration();
+						CombatRuntime::get().schedule(delay_time, [generation, device, code, duration] {
+							auto handler = blockHandler::GetSingleton();
+							auto player = RE::PlayerCharacter::GetSingleton();
+							auto controls = RE::PlayerControls::GetSingleton();
+							if (!player || !controls || handler->isBlockKeyHeld() || handler->keyGeneration() != generation) return;
+							auto event = RE::ButtonEvent::Create(device, "forceRelease", code, 0, duration);
+							if (event) {
+								_ProcessButton(controls->attackBlockHandler, event, &controls->data);
+								delete event;
+							}
+							player->NotifyAnimationGraph("blockStop");
+						});
+						return;
 					}
 				}
 			}
