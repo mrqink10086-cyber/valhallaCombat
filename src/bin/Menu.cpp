@@ -12,13 +12,14 @@ namespace {
 std::mutex draftMutex;
 config::Values draft=config::defaults();
 std::uint64_t revision=0;
-bool dirty=false, chinese=true;
+bool dirty=false;
 std::atomic<int> binding{-1};
 std::atomic<int> consumed{-1};
 std::unique_ptr<SKSEMenuFramework::Model::InputEvent> input;
 std::unique_ptr<SKSEMenuFramework::Model::Event> events;
 float frameworkVersion=0;
-const char* text(const char* english, const char* zh) { return chinese?zh:english; }
+bool chinese() { return config::value(draft,config::Key::bMenuChinese)!=0; }
+const char* text(const char* english, const char* zh) { return chinese()?zh:english; }
 int keyCode(RE::ButtonEvent* button)
 {
  const auto code=button->GetIDCode();
@@ -62,48 +63,108 @@ const char* translated(const config::Definition& entry)
  {"fTimedBlockMeleeExp","限时近战格挡经验"},{"fTimedBlockProjectileExp","限时投射物格挡经验"},{"fBlockProjectileExp","投射物格挡经验"},{"iAltBlockKey","替代格挡按键"},{"bTimedBlockScreenShake","格挡屏幕震动"},{"bTimeBlockSFX","格挡音效"},{"fTimedBlockSFXVolume","音量"},{"uTimedBlockSparkType","火花：0 幻想 / 1 写实 / 2 关闭"},{"bTimedBlockSlowTime","格挡慢时间"},{"fTimedBlockSlowTime_Timed","限时慢时间（有效实秒）"},{"fTimedBlockSlowTime_Perfect","完美慢时间（有效实秒）"},
  {"bStunToggle","眩晕与处决"},{"bStunMeterToggle","TrueHUD 眩晕条"},{"bFriendlyStunToggle","队友眩晕"},{"bDownedStateToggle","破防倒地"},{"fStunTimedBlockMult","限时格挡眩晕倍率"},{"fStunParryMult","招架眩晕倍率"},{"fStunBashMult","盾击眩晕倍率"},{"fStunPowerBashMult","强力盾击眩晕倍率"},{"fStunNormalAttackMult","轻击眩晕倍率"},{"fStunPowerAttackMult","强击眩晕倍率"},{"fStunCounterAttackMult","防御反击眩晕倍率"},
  {"fStunUnarmedMult","徒手眩晕倍率"},{"fStunDaggerMult","匕首眩晕倍率"},{"fStunSwordMult","单手剑眩晕倍率"},{"fStunWarAxeMult","战斧眩晕倍率"},{"fStunMaceMult","钉锤眩晕倍率"},{"fStunGreatSwordMult","双手剑眩晕倍率"},{"fStun2HBluntMult","双手钝器眩晕倍率"},{"bAutoExecution","后续命中时自动处决"},{"iExecutionKey","处决按键"},{"bPoiseCompatibility","Poise 兼容"}};
- const auto found=labels.find(entry.name); return chinese && found!=labels.end()?found->second:entry.label;
+ const auto found=labels.find(entry.name); return chinese() && found!=labels.end()?found->second:entry.label;
 }
 void controls()
 {
  const auto current=config::store().snapshot();
  if (!dirty || (current.saved!=revision && current.values==draft)) { draft=current.values; revision=current.saved; dirty=false; }
- ImGuiMCP::Checkbox("中文 / English",&chinese);
+ bool language=chinese();
+ if (ImGuiMCP::Checkbox("中文 / English##bMenuChinese",&language)) { draft[static_cast<std::size_t>(config::Key::bMenuChinese)]=language?1:0; dirty=true; }
+ ImGuiMCP::TextWrapped("%s",text("Global settings for every save. Click Apply to save changes.","全局设置，对所有存档生效。修改后点击应用保存。"));
  if (ImGuiMCP::Button(text("Apply","应用"))) settings::submit(draft,revision);
  ImGuiMCP::SameLine();
  if (ImGuiMCP::Button(text("Undo draft","撤销草稿"))) { draft=current.values; revision=current.saved; dirty=false; binding=-1; }
  ImGuiMCP::SameLine();
- if (ImGuiMCP::Button(text("Defaults","恢复默认"))) { draft=config::defaults(); dirty=true; }
+ if (ImGuiMCP::Button(text("Defaults","恢复默认"))) { draft=config::defaults(); dirty=true; binding=-1; }
  ImGuiMCP::SameLine();
- if (ImGuiMCP::Button(text("Reload file","重新读文件"))) CombatRuntime::get().control([] { settings::readSettings(); });
- ImGuiMCP::Text("%s: %llu / %s: %llu / %s: %s",text("Saved","已保存"),static_cast<unsigned long long>(current.saved),text("Effective","已生效"),static_cast<unsigned long long>(current.effective),text("Cleanup pending","待清理"),current.pendingCleanup?"YES":"NO");
- ImGuiMCP::TextUnformatted(current.message.c_str());
+ if (ImGuiMCP::Button(text("Reload file","重新读文件"))) { dirty=false; binding=-1; CombatRuntime::get().control([] { settings::readSettings(); }); }
+ if (dirty) ImGuiMCP::TextUnformatted(text("Unsaved changes","有未保存的修改"));
+ else if (current.pendingCleanup) ImGuiMCP::TextUnformatted(text("Saved; waiting for active effects to finish.","已保存，正在等待现有效果结束。"));
+ if (!current.message.empty() && current.message!="Saved and applied" && current.message!="Settings loaded") ImGuiMCP::TextUnformatted(current.message.c_str());
  std::string error; if (!config::validate(draft,error)) ImGuiMCP::TextUnformatted(error.c_str());
  if (binding.load()>=0) ImGuiMCP::TextUnformatted(text("Press a key/button; Escape unbinds. Close menu to cancel.","按下键盘、鼠标或手柄键；Esc 解除绑定，关闭菜单取消。"));
  ImGuiMCP::Separator();
 }
-void render(const char* page)
+std::string keyName(int code)
 {
- std::lock_guard lock(draftMutex); controls();
- for (std::size_t i=0;i<config::count;++i) {
-  const auto& entry=config::definitions()[i]; if (std::string_view(entry.page)!=page) continue;
-  const std::string label=std::string(translated(entry))+"##"+entry.name;
-  if (entry.kind==config::Kind::boolean) { bool value=draft[i]!=0; if (ImGuiMCP::Checkbox(label.c_str(),&value)) { draft[i]=value?1:0; dirty=true; } }
-  else if (entry.kind==config::Kind::real) { float value=static_cast<float>(draft[i]); if (ImGuiMCP::SliderFloat(label.c_str(),&value,static_cast<float>(entry.minimum),static_cast<float>(entry.maximum))) { draft[i]=value; dirty=true; } }
-  else { int value=static_cast<int>(draft[i]); if (ImGuiMCP::InputInt(label.c_str(),&value)) { draft[i]=value; dirty=true; }
-   if (entry.minimum==-1) {
-    ImGuiMCP::SameLine(); if (ImGuiMCP::Button((std::string(text("Capture##","绑定##"))+entry.name).c_str())) binding=static_cast<int>(i);
-    ImGuiMCP::SameLine(); if (ImGuiMCP::Button((std::string(text("Unbind##","解除##"))+entry.name).c_str())) { draft[i]=-1; dirty=true; }
-   }
-  }
+ if (code<0) return text("Unbound","未绑定");
+ if (code>=266 && code<=281) {
+  constexpr const char* names[]{"D-pad Up","D-pad Down","D-pad Left","D-pad Right","Start","Back","L3","R3","LB","RB","A","B","X","Y","LT","RT"};
+  return std::string(text("Gamepad ","手柄 "))+names[code-266];
+ }
+ if (code>=256) return std::string(text("Mouse ","鼠标 "))+std::to_string(code-255);
+ wchar_t wide[64]{}; char name[256]{};
+ const LONG scan=((code&0x7f)<<16)|(code>=128?(1<<24):0);
+ if (GetKeyNameTextW(scan,wide,64)>0 && WideCharToMultiByte(CP_UTF8,0,wide,-1,name,256,nullptr,nullptr)>0) return name;
+ return std::string(text("Key ","按键 "))+std::to_string(code);
+}
+void setting(config::Key key)
+{
+ const auto i=static_cast<std::size_t>(key); const auto& entry=config::definitions()[i];
+ const std::string id="##"+std::string(entry.name);
+ if (entry.kind==config::Kind::boolean) {
+  bool value=draft[i]!=0;
+  if (ImGuiMCP::Checkbox((std::string(translated(entry))+id).c_str(),&value)) { draft[i]=value?1:0; dirty=true; }
+  return;
+ }
+ if (entry.minimum==-1) {
+  ImGuiMCP::Text("%s: %s",translated(entry),keyName(static_cast<int>(draft[i])).c_str());
+  if (ImGuiMCP::Button((std::string(binding.load()==static_cast<int>(i)?text("Press a key","请按键"):text("Capture","绑定"))+id).c_str())) binding=static_cast<int>(i);
+  ImGuiMCP::SameLine();
+  if (ImGuiMCP::Button((std::string(text("Unbind","解除"))+id).c_str())) { draft[i]=-1; dirty=true; binding=-1; }
+  return;
+ }
+ ImGuiMCP::TextUnformatted(translated(entry)); ImGuiMCP::SetNextItemWidth(-1.0f);
+ if (entry.kind==config::Kind::real) {
+  float value=static_cast<float>(draft[i]);
+  if (ImGuiMCP::SliderFloat(id.c_str(),&value,static_cast<float>(entry.minimum),static_cast<float>(entry.maximum))) { draft[i]=value; dirty=true; }
+ } else {
+  int value=static_cast<int>(draft[i]);
+  if (ImGuiMCP::InputInt(id.c_str(),&value)) { draft[i]=value; dirty=true; }
  }
 }
-void __stdcall overview() { std::lock_guard lock(draftMutex); controls(); ImGuiMCP::Text("SKSE Menu Framework %.1f / API 1",frameworkVersion); ImGuiMCP::Text("TrueHUD: %s / Special bar: %s / Precision: %s",settings::facts::TrueHudAPI_Obtained?"YES":"NO",settings::facts::TrueHudAPI_HasSpecialBarControl?"YES":"NO",settings::facts::PrecisionAPI_Obtained?"YES":"NO"); ImGuiMCP::TextUnformatted(text("Light attack stun defaults to zero. Execution requires a supported race and weapon animation.","轻击默认不扣眩晕。处决需要种族映射与武器动作支持。")); }
-void __stdcall stamina() { render("Stamina"); }
-void __stdcall blocking() { render("Blocking"); }
-void __stdcall stun() { render("Stun"); }
-void __stdcall effects() { render("Effects"); }
-void __stdcall diagnostics() { std::lock_guard lock(draftMutex); controls(); ImGuiMCP::Text("Session: %llu",static_cast<unsigned long long>(CombatRuntime::get().session())); ImGuiMCP::TextUnformatted(config::store().path().string().c_str()); ImGuiMCP::TextUnformatted(executionHandler::GetSingleton()->status().c_str()); }
+void section(const char* page,const char* english,const char* zh)
+{
+ ImGuiMCP::Separator(); ImGuiMCP::TextUnformatted(text(english,zh));
+ if (std::string_view(page)=="Stun") {
+  setting(config::Key::iExecutionKey); setting(config::Key::bStunToggle); setting(config::Key::bStunMeterToggle); setting(config::Key::bAutoExecution);
+  if (!settings::facts::TrueHudAPI_Obtained || !settings::facts::TrueHudAPI_HasSpecialBarControl)
+   ImGuiMCP::TextWrapped("%s",text("Stun meter needs TrueHUD special bar control. Check TrueHUD installation and special bar settings.","眩晕条需要 TrueHUD 特殊条控制权。请检查 TrueHUD 安装和特殊条设置。"));
+ }
+ for (std::size_t i=0;i<config::count;++i) {
+  const auto key=static_cast<config::Key>(i); const auto& entry=config::definitions()[i];
+  if (std::string_view(entry.page)!=page) continue;
+  if (key==config::Key::iExecutionKey || key==config::Key::bStunToggle || key==config::Key::bStunMeterToggle || key==config::Key::bAutoExecution) continue;
+  setting(key);
+ }
+}
+void __stdcall allSettings()
+{
+ std::lock_guard lock(draftMutex); controls();
+ static int category=0;
+ if (ImGuiMCP::Button(text("All settings","全部设置"))) category=0;
+ ImGuiMCP::SameLine(); if (ImGuiMCP::Button(text("Stun / execution","眩晕 / 处决"))) category=1;
+ ImGuiMCP::SameLine(); if (ImGuiMCP::Button(text("Stamina","耐力"))) category=2;
+ if (ImGuiMCP::Button(text("Blocking / tackle","格挡 / 冲撞"))) category=3;
+ ImGuiMCP::SameLine(); if (ImGuiMCP::Button(text("Effects / compatibility","效果 / 兼容"))) category=4;
+ if (category==0 || category==1) section("Stun","Stun and execution","眩晕与处决");
+ if (category==0 || category==2) section("Stamina","Stamina","耐力");
+ if (category==0 || category==3) section("Blocking","Blocking and tackle","格挡与冲撞");
+ if (category==0 || category==4) section("Effects","Effects and compatibility","效果与兼容");
+}
+void __stdcall diagnostics()
+{
+ std::lock_guard lock(draftMutex);
+ const auto current=config::store().snapshot();
+ ImGuiMCP::Text("SKSE Menu Framework %.1f / API 1",frameworkVersion);
+ ImGuiMCP::Text("TrueHUD: %s / Special bar: %s / Precision: %s",settings::facts::TrueHudAPI_Obtained?"YES":"NO",settings::facts::TrueHudAPI_HasSpecialBarControl?"YES":"NO",settings::facts::PrecisionAPI_Obtained?"YES":"NO");
+ ImGuiMCP::Text("Session: %llu",static_cast<unsigned long long>(CombatRuntime::get().session()));
+ ImGuiMCP::Text("Saved: %llu / Effective: %llu / Cleanup pending: %s",static_cast<unsigned long long>(current.saved),static_cast<unsigned long long>(current.effective),current.pendingCleanup?"YES":"NO");
+ ImGuiMCP::TextUnformatted(current.message.c_str());
+ ImGuiMCP::TextUnformatted(config::store().path().string().c_str());
+ ImGuiMCP::TextUnformatted(executionHandler::GetSingleton()->status().c_str());
+}
 }
 namespace Menu {
 bool capturing() { return binding.load()>=0 || consumed.load()>=0; }
@@ -111,16 +172,12 @@ void registerMenu()
 {
  const auto module=GetModuleHandleW(L"SKSEMenuFramework.dll");
  if (!module) { logger::info("SKSE Menu Framework unavailable; file settings remain active"); return; }
- for (auto name : {"GetMenuFrameworkVersion","GetMenuFrameworkAPIVersion","AddSectionItem","RegisterInpoutEvent","UnregisterInputEvent","RegisterEventPriority","UnregisterEvent","igCheckbox","igButton","igSameLine","igSeparator","igText","igTextUnformatted","igSliderFloat","igInputInt"}) if (!GetProcAddress(module,name)) { logger::error("Menu Framework missing export {}",name); return; }
+ for (auto name : {"GetMenuFrameworkVersion","GetMenuFrameworkAPIVersion","AddSectionItem","RegisterInpoutEvent","UnregisterInputEvent","RegisterEventPriority","UnregisterEvent","igCheckbox","igButton","igSameLine","igSeparator","igTextV","igTextWrappedV","igTextUnformatted","igSetNextItemWidth","igSliderFloat","igInputInt"}) if (!GetProcAddress(module,name)) { logger::error("Menu Framework missing export {}",name); return; }
  const auto api=reinterpret_cast<std::uint32_t(*)()>(GetProcAddress(module,"GetMenuFrameworkAPIVersion"));
  if (api()!=1) { logger::error("Unsupported Menu Framework API {}",api()); return; }
  frameworkVersion=SKSEMenuFramework::GetMenuFrameworkVersion();
  SKSEMenuFramework::SetSection("Valhalla Combat");
- SKSEMenuFramework::AddSectionItem("Overview 总览",overview);
- SKSEMenuFramework::AddSectionItem("Stamina 耐力",stamina);
- SKSEMenuFramework::AddSectionItem("Blocking 格挡与冲撞",blocking);
- SKSEMenuFramework::AddSectionItem("Stun 眩晕与处决",stun);
- SKSEMenuFramework::AddSectionItem("Effects 效果与兼容",effects);
+ SKSEMenuFramework::AddSectionItem("Settings 设置",allSettings);
  SKSEMenuFramework::AddSectionItem("Diagnostics 诊断",diagnostics);
  input=std::make_unique<SKSEMenuFramework::Model::InputEvent>(capture);
  events=std::make_unique<SKSEMenuFramework::Model::Event>(menuEvent,0.0f);

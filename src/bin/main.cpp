@@ -93,7 +93,7 @@ void onPostLoadGame() {
 	}
 	CombatRuntime::get().beginSession();
 	OwnedEffects::update();
-	settings::updateGameSettings();
+	settings::reapplySettings();
 }
 
 void endCombatSession()

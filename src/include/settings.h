@@ -19,6 +19,7 @@ public:
  static inline bool bPlayerExecution=false, bExecutionLimit=true, bBalanceToggle=true;
  static inline bool bExhaustionAIToggle=true, bCirclingAIToggle=true, bPerilousAttackAIToggle=true;
  static void readSettings();
+ static void reapplySettings();
  static void submit(config::Values values, std::uint64_t expected);
  static void updateGameSettings();
  static void cleanupReceipt();

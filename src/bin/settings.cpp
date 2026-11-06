@@ -66,6 +66,10 @@ void settings::readSettings()
  if (config::store().load(values,error)) { logger::info("Settings: {}",config::store().snapshot().message); apply(values); }
  else { config::store().failure(error); logger::error("Settings load failed: {}",error); }
 }
+void settings::reapplySettings()
+{
+ apply(config::store().snapshot().values);
+}
 void settings::submit(config::Values values, std::uint64_t expected)
 {
  CombatRuntime::get().control([values=std::move(values),expected] {

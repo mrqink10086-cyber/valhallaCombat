@@ -64,3 +64,4 @@ VC_SETTING(float,fStun2HBluntMult,1.2f,Stun,Stun,"Two-handed blunt stun multipli
 VC_SETTING(bool,bAutoExecution,false,Stun,Stun,"Automatic execution on a following hit",0,1)
 VC_SETTING(int,iExecutionKey,-1,Stun,Stun,"Execution key",-1,281)
 VC_SETTING(bool,bPoiseCompatibility,false,Compatibility,Effects,"Poise compatibility",0,1)
+VC_SETTING(bool,bMenuChinese,true,Interface,Interface,"Chinese menu",0,1)

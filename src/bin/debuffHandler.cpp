@@ -17,9 +17,9 @@ void debuffHandler::update(float delta)
     for (const auto handle : handles) {
         auto actor = handle.get();
         if (!actor) { std::unique_lock lock(mtx_actorInDebuff); actorInDebuff.erase(handle); ownedPerks.erase(handle); ownedUI.erase(handle); continue; }
-        const float maximum = actor->GetPermanentActorValue(RE::ActorValue::kStamina) +
+        const float maximum = actor->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina) +
             actor->GetActorValueModifier(RE::ACTOR_VALUE_MODIFIER::kTemporary, RE::ActorValue::kStamina);
-        if (!settings::bStaminaDebuffToggle || Utils::Actor::isDead(actor.get()) || actor->GetActorValue(RE::ActorValue::kStamina) >= maximum) {
+        if (!settings::bStaminaDebuffToggle || Utils::Actor::isDead(actor.get()) || actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kStamina) >= maximum) {
             stopDebuff(actor.get()); continue;
         }
         if (settings::bUIAlert && !ownedUI.contains(handle)) initDebuffUI(actor.get());

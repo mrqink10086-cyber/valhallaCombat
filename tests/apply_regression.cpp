@@ -9,6 +9,7 @@ public:
 #include "include/Settings.def"
 #undef VC_SETTING
  static void apply(const config::Values&);
+ static void reapplySettings();
  static void updateGameSettings() {}
 };
 namespace RE {
@@ -53,5 +54,8 @@ int main() {
  attackHandler::GetSingleton()->cached=true;
  values[static_cast<std::size_t>(config::Key::bAttackStaminaToggle_NPC)]=!settings::bAttackStaminaToggle_NPC;
  settings::apply(values); require(!attackHandler::GetSingleton()->cached);
+ settings::fCombatStaminaRegenMult=99;
+ settings::reapplySettings();
+ require(settings::fCombatStaminaRegenMult==config::value(config::store().snapshot().values,config::Key::fCombatStaminaRegenMult));
  std::puts("hot attack switch cancels cache; HUD cleanup precedes release; accumulation applies: PASS");
 }

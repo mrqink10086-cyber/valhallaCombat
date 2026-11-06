@@ -167,8 +167,8 @@ void stunHandler::damageStun(RE::Actor*, RE::Actor* victim, float amount)
     auto [it, inserted] = states.try_emplace(handle);
     auto& state = it->second;
     if (inserted) {
-        state.maximum = std::max(1.0f, (victim->GetPermanentActorValue(RE::ActorValue::kHealth) +
-            victim->GetPermanentActorValue(RE::ActorValue::kStamina)) / 2);
+        state.maximum = std::max(1.0f, (victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kHealth) +
+            victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina)) / 2);
         state.current = state.maximum;
     }
     state.cleanup = false;
@@ -222,9 +222,9 @@ void stunHandler::processStunDamage(STUNSOURCE source, RE::TESObjectWEAP* weapon
     float damage = 0;
     switch (source) {
     case timedBlock: damage = base * settings::fStunTimedBlockMult; break;
-    case bash: damage = aggressor->GetActorValue(RE::ActorValue::kBlock) * settings::fStunBashMult; break;
-    case powerBash: damage = aggressor->GetActorValue(RE::ActorValue::kBlock) * settings::fStunPowerBashMult; break;
-    case parry: damage = aggressor->GetActorValue(RE::ActorValue::kBlock) * settings::fStunParryMult; break;
+    case bash: damage = aggressor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kBlock) * settings::fStunBashMult; break;
+    case powerBash: damage = aggressor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kBlock) * settings::fStunPowerBashMult; break;
+    case parry: damage = aggressor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kBlock) * settings::fStunParryMult; break;
     case counterAttack: damage = base * settings::fStunCounterAttackMult; break;
     case lightAttack:
     case powerAttack:

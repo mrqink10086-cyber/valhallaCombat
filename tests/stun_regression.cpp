@@ -42,11 +42,16 @@ struct TESForm { template<class T> static T* LookupByID(int) { return nullptr; }
 struct Actor;
 struct ActorPtr { Actor* actor; Actor* get() const { return actor; } Actor* operator->() const { return actor; } explicit operator bool() const { return actor!=nullptr; } };
 struct ActorHandle { Actor* actor; ActorPtr get() const { return {actor}; } bool operator==(const ActorHandle&) const=default; };
+struct ActorValueOwner {
+ float health=100,stamina=100,block=50;
+ float GetPermanentActorValue(ActorValue value) const { return value==ActorValue::kHealth?health:stamina; }
+ float GetActorValue(ActorValue value) const { return value==ActorValue::kBlock?block:stamina; }
+};
 struct Actor {
  bool loaded=true,dead=false,downed=false,inCombat=true;
+ ActorValueOwner values;
  ActorHandle GetHandle() { return {this}; }
- float GetPermanentActorValue(ActorValue) { return 100; }
- float GetActorValue(ActorValue) { return 50; }
+ ActorValueOwner* AsActorValueOwner() { return &values; }
  bool Is3DLoaded() { return loaded; } bool IsInKillMove() { return false; }
  Actor* AsActorState() { return this; } bool IsSwimming() { return false; }
  bool IsInCombat() { return inCombat; } bool IsPlayerRef() { return false; } bool IsPlayerTeammate() { return false; }
@@ -83,6 +88,23 @@ struct ValhallaCombat { enum { stunHandler }; static ValhallaCombat* GetSingleto
 void require(bool value) { if (!value) throw std::runtime_error("stun regression"); }
 int main() {
  auto h=stunHandler::GetSingleton(); RE::Actor attacker,target,other;
+ target.values.health=800;
+ target.values.stamina=200;
+ h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,1);
+ require(h->getMaxStun(&target)==500 && h->getCurrentStun(&target)==499 && !h->getIsStunBroken(&target));
+ h->reset();
+ attacker.values.block=80;
+ for (const auto [source,multiplier] : {
+     std::pair{stunHandler::bash,settings::fStunBashMult},
+     std::pair{stunHandler::powerBash,settings::fStunPowerBashMult},
+     std::pair{stunHandler::parry,settings::fStunParryMult}}) {
+  h->processStunDamage(source,nullptr,&attacker,&target,1);
+  require(std::abs(h->getCurrentStun(&target)-(500-80*multiplier))<.0001f);
+  require(!h->getIsStunBroken(&target));
+  h->reset();
+ }
+ target.values={};
+ attacker.values={};
  settings::bDownedStateToggle=true;
  hook=[&] { h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&other,5); };
  h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);

@@ -5,13 +5,13 @@ import sys
 
 root, output = map(Path, sys.argv[1:])
 cases = {
-    "apply": ("settings.cpp", ["void settings::apply("]),
+    "apply": ("settings.cpp", ["void settings::apply(", "void settings::reapplySettings()"]),
     "counter": ("blockHandler.cpp", ["void blockHandler::EldenCounterCompatibility::triggerCounter(", "void blockHandler::EldenCounterCompatibility::async_removeECTriggerSpell(", "void blockHandler::EldenCounterCompatibility::reset()"]),
     "block": ("blockHandler.cpp", ["void blockHandler::reset()", "void blockHandler::onBlockKeyDown()", "void blockHandler::onBlockKeyUp()", "void blockHandler::processStaminaBlock(", "PRECISION_API::PreHitCallbackReturn blockHandler::precisionPrehitCallbackFunc(", "void blockHandler::update()", "void blockHandler::onPcTimedBlockEnd()", "inline void blockHandler::pcBlockWindowPenalty_update("]),
     "execution": ("executionHandler.cpp", ["void executionHandler::tryPcExecution()", "void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim, RE::TESIdleForm* idle", "void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim, std::vector"]),
-    "debuff": ("debuffHandler.cpp", ["void debuffHandler::stopDebuff("]),
+    "debuff": ("debuffHandler.cpp", ["void debuffHandler::update(", "void debuffHandler::stopDebuff("]),
     "owned": ("OwnedEffects.cpp", ["void add(", "void remove(", "void retry(", "bool pending()", "void update()"]),
-    "message": ("main.cpp", ["void dispatchLifecycle(", "void MessageHandler("]),
+    "message": ("main.cpp", ["void dispatchLifecycle(", "void onPostLoadGame()", "void MessageHandler("]),
     "self_test_trigger": ("CombatSelfTest.cpp", ["void startManualTrigger("]),
 }
 
@@ -59,3 +59,5 @@ utils_functions = [extract(utils_cpp, "void Utils::Actor::damageav("), extract(u
 
 stun = (root / "src/bin/stunHandler.cpp").read_text(encoding="utf-8-sig")
 (output / "stun_functions.inc").write_text(re.sub(r'^#include[^\n]*\n', '', stun, flags=re.M), encoding="utf-8")
+menu = (root / "src/bin/Menu.cpp").read_text(encoding="utf-8-sig")
+(output / "menu_functions.inc").write_text(re.sub(r'^#(?:include|pragma)[^\n]*\n', '', menu, flags=re.M), encoding="utf-8")
