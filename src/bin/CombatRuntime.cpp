@@ -15,6 +15,7 @@ void CombatRuntime::endSession()
 	{
 		std::lock_guard lock(mutex);
 		work.clear();
+		deadlines.clear();
 		clock = 0;
 	}
 	if (ownerThread()) clearSlowTime();
@@ -24,13 +25,18 @@ CombatRuntime::Ticket CombatRuntime::schedule(float seconds, Task task)
 	std::lock_guard lock(mutex);
 	if (!active || !std::isfinite(seconds)) return 0;
 	const auto id = nextTicket++;
-	work.push_back({id, epoch.load(), clock + std::max(0.0f, seconds), std::move(task)});
+	const auto deadline = clock + std::max(0.0f, seconds);
+	work.emplace(id, Work{id, epoch.load(), deadline, std::move(task)});
+	deadlines.emplace(deadline, id);
 	return id;
 }
 void CombatRuntime::cancel(Ticket ticket)
 {
 	std::lock_guard lock(mutex);
-	std::erase_if(work, [ticket](const Work& entry) { return entry.id == ticket; });
+	const auto it = work.find(ticket);
+	if (it == work.end()) return;
+	deadlines.erase({it->second.deadline, ticket});
+	work.erase(it);
 }
 void CombatRuntime::control(Task task)
 {
@@ -39,6 +45,7 @@ void CombatRuntime::control(Task task)
 		tasks->AddTask([this, generation, task = std::move(task)] {
 			if (generation != epoch.load()) return;
 			try { task(); } catch (const std::exception& error) { logger::error("Control command failed: {}", error.what()); }
+			catch (...) { logger::error("Control command failed with an unknown exception"); }
 		});
 	}
 }
@@ -55,22 +62,22 @@ void CombatRuntime::update(bool paused)
 	{
 		std::lock_guard lock(mutex);
 		clock += elapsed;
-		for (auto it = work.begin(); it != work.end();) {
-			if (it->session != epoch.load()) it = work.erase(it);
-			else if (it->deadline <= clock) { due.push_back(it->id); ++it; }
-			else ++it;
-		}
+		auto end = deadlines.upper_bound({clock, UINT64_MAX});
+		for (auto it = deadlines.begin(); it != end; ++it) due.push_back(it->second);
+		deadlines.erase(deadlines.begin(), end);
 	}
+	std::sort(due.begin(), due.end());
 	for (const auto id : due) {
 		if (!ready()) break;
 		Task task;
 		{ std::lock_guard lock(mutex);
-		 const auto it=std::find_if(work.begin(),work.end(),[id](const Work& item){ return item.id==id; });
+		 const auto it=work.find(id);
 		 if (it==work.end()) continue;
-		 if (it->session==epoch.load()) task=std::move(it->task);
+		 if (it->second.session==epoch.load()) task=std::move(it->second.task);
 		 work.erase(it);
 		}
 		try { if (task) task(); } catch (const std::exception& error) { logger::error("Combat request {} failed: {}", id, error.what()); }
+		catch (...) { logger::error("Combat request {} failed with an unknown exception", id); }
 	}
 	updateSlowTime();
 }

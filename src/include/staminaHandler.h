@@ -10,9 +10,6 @@ public:
 	static void staminaLightMiss(RE::Actor* a);
 	static void staminaLightHit(RE::Actor* a);
 
-	static void staminaHeavyMiss(RE::Actor* a);
-
-	static void staminaHeavyHit(RE::Actor* a);
 
 
 

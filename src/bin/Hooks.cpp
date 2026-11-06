@@ -7,13 +7,22 @@
 #include "include/AI.h"
 #include "include/settings.h"
 #include "include/attackHandler.h"
+#include "include/CombatTrace.h"
 namespace Hooks
 {
 #pragma region GetHeavyStaminaCost
 	float Hook_OnGetAttackStaminaCost::getAttackStaminaCost(RE::ActorValueOwner* avOwner, RE::BGSAttackData* atkData)
 	{
+	#if VC_COMBAT_TRACE
+			VC_TRACE_SCOPE(CombatTrace::EventKind::CostHook, 0, CombatRuntime::get().session());
+	#endif
+			if (!CombatRuntime::get().ready() || !avOwner) return _getAttackStaminaCost(avOwner,atkData);
 		RE::Actor* a_actor = Utils::AvOwner::asActor(avOwner);
-			if (!CombatRuntime::get().ready() || !a_actor) return _getAttackStaminaCost(avOwner,atkData);
+			if (!a_actor) return _getAttackStaminaCost(avOwner,atkData);
+		if (!attackHandler::enabledFor(a_actor)) return _getAttackStaminaCost(avOwner,atkData);
+#if VC_COMBAT_TRACE
+		VC_TRACE_EVENT(CombatTrace::EventKind::CostHook, a_actor->GetHandle().native_handle(), CombatRuntime::get().session());
+#endif
 		if (!settings::bNonCombatStaminaCost && !a_actor->IsInCombat()) {
 			return 0;
 		}
@@ -42,6 +51,9 @@ used to block stamina regen in certain situations.*/
 
 	void Hook_OnRestoreActorValue::RestoreActorValue(RE::Actor* a_actor, RE::ActorValue a_actorValue, float a_val)
 	{
+#if VC_COMBAT_TRACE
+			VC_TRACE_SCOPE(CombatTrace::EventKind::StaminaRestore, 0, CombatRuntime::get().session());
+#endif
 			if (!CombatRuntime::get().ready() || !a_actor) { _RestoreActorValue(a_actor,a_actorValue,a_val); return; }
 		switch (a_actorValue) {
 		case RE::ActorValue::kStamina:
@@ -91,6 +103,9 @@ used to block stamina regen in certain situations.*/
 			return;
 		}
 			hitProcessor::GetSingleton()->processHit(aggressor.get(), victim, hitData);
+#if VC_COMBAT_TRACE
+			VC_TRACE_SCOPE(CombatTrace::EventKind::EngineMeleeHit, victim->GetHandle().native_handle(), CombatRuntime::get().session());
+#endif
 		_ProcessHit(victim, hitData);
 	}
 
@@ -125,6 +140,9 @@ used to block stamina regen in certain situations.*/
 	}
 	inline bool shouldIgnoreHit(RE::Projectile* a_projectile, RE::hkpAllCdPointCollector* a_AllCdPointCollector)
 	{
+#if VC_COMBAT_TRACE
+			VC_TRACE_SCOPE(CombatTrace::EventKind::ProjectileCollision, 0, CombatRuntime::get().session());
+#endif
 			if (!CombatRuntime::get().ready() || !a_projectile || !a_AllCdPointCollector) {
 			return false;
 		}
@@ -254,6 +272,7 @@ used to block stamina regen in certain situations.*/
 	{
 		// // O: insert return statement here
 		_GetWantBlock(unk_ptr, a_channelName, unk_int, a_actor, a_result);
+			if (!CombatRuntime::get().ready() || !a_actor) return a_result;
 
 		if (!a_actor->IsPlayerRef()) {
 			if (debuffHandler::GetSingleton()->isInDebuff(a_actor)) {

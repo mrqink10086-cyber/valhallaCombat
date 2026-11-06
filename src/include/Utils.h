@@ -81,9 +81,13 @@ namespace inlineUtils
 
 	inline void SetRotationMatrix(RE::NiMatrix3& a_matrix, float sacb, float cacb, float sb)
 	{
-		float cb = std::sqrtf(1 - sb * sb);
-		float ca = cacb / cb;
-		float sa = sacb / cb;
+		sb = std::clamp(sb, -1.0f, 1.0f);
+		const float horizontal = std::hypot(sacb, cacb);
+		const float cb = std::sqrt(std::max(0.0f, 1.0f - sb * sb));
+		const float ca = horizontal > 0 ? cacb / horizontal : 1.0f;
+		const float sa = horizontal > 0 ? sacb / horizontal : 0.0f;
+		sacb = sa * cb;
+		cacb = ca * cb;
 		a_matrix.entry[0][0] = ca;
 		a_matrix.entry[0][1] = -sacb;
 		a_matrix.entry[0][2] = sa * sb;
@@ -236,11 +240,11 @@ public:
 	@param formid: formid of the sound descriptor.*/
 	static void playSound(RE::Actor* a, RE::BGSSoundDescriptorForm* a_descriptor, float a_volumeOverride = 1)
 	{
-
+		if (!a || !a_descriptor) return;
 		RE::BSSoundHandle handle;
 		handle.soundID = static_cast<uint32_t>(-1);
 		handle.assumeSuccess = false;
-		*(uint32_t*)&handle.state = 0;
+		handle.state = RE::BSSoundHandle::AssumedState::kInitialized;
 
 		RE::Offset::soundHelper_a(RE::BSAudioManager::GetSingleton(), &handle, a_descriptor->GetFormID(), 16);
 		if (RE::Offset::set_sound_position(&handle, a->data.location.x, a->data.location.y, a->data.location.z)) {
@@ -422,7 +426,7 @@ public:
 			RE::NiPoint3 direction = a_projectile->GetProjectileRuntimeData().linearVelocity;
 			direction.Unitize();
 
-			a_projectile->data.angle.x = asin(direction.z);
+			a_projectile->data.angle.x = asin(std::clamp(direction.z, -1.0f, 1.0f));
 			a_projectile->data.angle.z = atan2(direction.x, direction.y);
 
 			if (a_projectile->data.angle.z < 0.0) {
@@ -498,7 +502,7 @@ public:
 		RE::NiPoint3 direction = a_projectile->GetProjectileRuntimeData().linearVelocity;
 		direction.Unitize();
 
-		a_projectile->data.angle.x = asin(direction.z);
+		a_projectile->data.angle.x = asin(std::clamp(direction.z, -1.0f, 1.0f));
 		a_projectile->data.angle.z = atan2(direction.x, direction.y);
 
 		if (a_projectile->data.angle.z < 0.0) {

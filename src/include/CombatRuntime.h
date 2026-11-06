@@ -3,6 +3,8 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <set>
+#include <unordered_map>
 #include <vector>
 #include <cstdint>
 #include <Windows.h>
@@ -35,7 +37,8 @@ private:
 	std::atomic<bool> active{false};
 	std::atomic<DWORD> owner{0};
 	std::mutex mutex;
-	std::vector<Work> work;
+	std::unordered_map<Ticket, Work> work;
+	std::set<std::pair<double, Ticket>> deadlines;
 	Ticket nextTicket{1};
 	double clock{0};
 	std::chrono::steady_clock::time_point last{};

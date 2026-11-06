@@ -10,7 +10,7 @@ bool Utils::Actor::isHumanoid(RE::Actor* a_actor)
 RE::TESObjectWEAP* Utils::Actor::getWieldingWeapon(RE::Actor* a_actor)
 {
 	auto weapon = a_actor->GetAttackingWeapon();
-	if (weapon) {
+	if (weapon && weapon->object) {
 		return weapon->object->As<RE::TESObjectWEAP>();
 	}
 	auto rhs = a_actor->GetEquippedObject(false);
@@ -70,7 +70,7 @@ void Utils::Actor::damageav(RE::Actor* a, RE::ActorValue av, float val)
 bool Utils::Actor::tryDamageAv(RE::Actor* a_actor, RE::ActorValue a_actorValue, float a_damage)
 {
 	auto currentAv = a_actor->AsActorValueOwner()->GetActorValue(a_actorValue);
-	if (currentAv - a_damage <= 0) {
+	if (!std::isfinite(a_damage) || a_damage < 0 || currentAv < a_damage) {
 		return false;
 	}
 	damageav(a_actor, a_actorValue, a_damage);

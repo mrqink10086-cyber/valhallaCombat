@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(
 	ValhallaCombat
-	VERSION 1.0.0
+	VERSION 1.1.0
 	LANGUAGES CXX
 )
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +26,8 @@ endif()
 option(ENABLE_SKYRIM_SE "Enable support for Skyrim SE in the dynamic runtime feature." ON)
 option(ENABLE_SKYRIM_AE "Enable support for Skyrim AE in the dynamic runtime feature." ON)
 option(ENABLE_SKYRIM_VR "Enable support for Skyrim VR in the dynamic runtime feature." OFF)
+option(VALHALLA_COMBAT_TRACE "Capture bounded combat timing records for engine measurements" OFF)
+set(VALHALLA_COMBAT_TRACE_DIR "${CMAKE_BINARY_DIR}/trace" CACHE PATH "Combat timing export directory")
 set(BUILD_TESTS OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")

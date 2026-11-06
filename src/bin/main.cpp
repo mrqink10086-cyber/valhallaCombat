@@ -13,14 +13,23 @@
 #include "include/executionHandler.h"
 #include "include/Menu.h"
 #include "include/OwnedEffects.h"
+#include "include/CombatTrace.h"
+#include "include/CombatSelfTest.h"
 void endCombatSession();
 namespace {
 bool hooksInstalled = false;
+void dispatchLifecycle(CombatRuntime::Task task) {
+ if (auto tasks=SKSE::GetTaskInterface()) {
+  tasks->AddTask(std::move(task));
+ } else {
+  logger::error("Cannot dispatch combat lifecycle without the SKSE task interface");
+ }
+}
 class MenuLifecycle final : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
  RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* event,RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override {
   const bool main=event && event->opening && event->menuName==RE::MainMenu::MENU_NAME;
   const auto action=[main] { CombatRuntime::get().resetClock(); if (main) endCombatSession(); };
-  if (CombatRuntime::get().ownerThread()) action(); else CombatRuntime::get().control(action);
+  dispatchLifecycle(action);
   return RE::BSEventNotifyControl::kContinue;
  }
 };
@@ -57,6 +66,7 @@ void initPrecisionAPI() {
 void onDataLoaded() 
 {
 	CombatRuntime::get().initialize();
+	logger::info("Combat owner initialized on thread {}", GetCurrentThreadId());
 	settings::readSettings();
 	events::registerAllEventHandlers();
 	if (auto ui=RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&menuLifecycle);
@@ -64,6 +74,9 @@ void onDataLoaded()
 	blockHandler::GetSingleton()->init();
 	blockHandler::EldenCounterCompatibility::attemptInit(); //todo: fix this jank
 	hooksInstalled = Hooks::install();
+#if VC_COMBAT_TRACE
+	CombatSelfTest::startManualTrigger(VC_COMBAT_TRACE_DIR);
+#endif
 }
 
 void onPostLoad() {
@@ -86,6 +99,7 @@ void onPostLoadGame() {
 void endCombatSession()
 {
 	CombatRuntime::get().endSession();
+	animEventHandler::reset();
 	debuffHandler::GetSingleton()->reset();
 	stunHandler::GetSingleton()->reset();
 	blockHandler::EldenCounterCompatibility::reset();
@@ -93,6 +107,11 @@ void endCombatSession()
 	attackHandler::GetSingleton()->reset();
 	executionHandler::GetSingleton()->reset();
 	OwnedEffects::restore();
+#if VC_COMBAT_TRACE
+	if (auto tasks=SKSE::GetTaskInterface()) tasks->AddTask([] {
+		CombatTrace::flush(VC_COMBAT_TRACE_DIR);
+	});
+#endif
 }
 
 
@@ -104,21 +123,19 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 			Menu::registerMenu();
 			break;
 	case SKSE::MessagingInterface::kDataLoaded:
-		onDataLoaded();
+			dispatchLifecycle(onDataLoaded);
 		break;
 	case SKSE::MessagingInterface::kPostLoad:
 		onPostLoad();
 		break;
 	case SKSE::MessagingInterface::kPostLoadGame:
-				if (a_msg->data != nullptr) onPostLoadGame();
-			else endCombatSession();
+			dispatchLifecycle(a_msg->data != nullptr ? onPostLoadGame : endCombatSession);
 		break;
 		case SKSE::MessagingInterface::kPreLoadGame:
-			endCombatSession();
+				dispatchLifecycle(endCombatSession);
 			break;
 		case SKSE::MessagingInterface::kNewGame:
-			endCombatSession();
-			onPostLoadGame();
+				dispatchLifecycle([] { endCombatSession(); onPostLoadGame(); });
 			break;
 	}
 }

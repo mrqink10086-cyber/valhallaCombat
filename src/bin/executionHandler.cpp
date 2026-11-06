@@ -3,6 +3,7 @@
 #include "include/settings.h"
 #include "include/stunHandler.h"
 #include "include/Utils.h"
+#include "include/CombatTrace.h"
 #define DATA data::GetSingleton()
 using namespace inlineUtils;
 void executionHandler::tryPcExecution() {
@@ -40,6 +41,9 @@ void executionHandler::tryPcExecution() {
 
 }
 bool executionHandler::attemptExecute(RE::Actor* a_executor, RE::Actor* a_victim) {
+#if VC_COMBAT_TRACE
+	VC_TRACE_SCOPE(CombatTrace::EventKind::Execution, 0, CombatRuntime::get().session());
+#endif
 	//check if victim can be executed
 		if (!CombatRuntime::get().ready() || !a_executor || !a_victim || !settings::bStunToggle
 		|| !Utils::Actor::isHumanoid(a_executor) || Utils::Actor::isDead(a_executor) || Utils::Actor::isDead(a_victim)

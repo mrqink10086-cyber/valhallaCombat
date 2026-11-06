@@ -13,8 +13,6 @@ public:
 #define VC_SETTING(type,name,initial,section,page,label,low,high) static inline type name=initial;
 #include "Settings.def"
 #undef VC_SETTING
- static inline float fMeleeCostHeavyMiss_Percent=0.4f;
- static inline float fMeleeCostHeavyHit_Percent=0.333f;
  static inline bool bSpiritToggle=true, bSpiritGuardStanceToggle=true;
  static inline float fHeavyAttackSpiritGain=20, fLightAttackSpiritLoss=5;
  static inline float fSpiritDamageBuff_1=1.2f, fSpiritDamageBuff_2=1.4f, fSpiritDamageBuff_3=1.6f;

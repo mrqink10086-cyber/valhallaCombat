@@ -7,21 +7,25 @@
 #include "include/reactionHandler.h"
 #include "include/AI.h"
 #include "include/Utils.h"
+#include "include/events.h"
+#include "include/CombatTrace.h"
 void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::HitData& a_hitData) {
+#if VC_COMBAT_TRACE
+	VC_TRACE_SCOPE(CombatTrace::EventKind::HitProcessing, a_aggressor->GetHandle().native_handle(), CombatRuntime::get().session());
+	VC_TRACE_EVENT(CombatTrace::EventKind::Hit, a_aggressor->GetHandle().native_handle(), CombatRuntime::get().session());
+#endif
+	animEventHandler::flush();
 	//offset damage from hitdata, based on player difficulty setting.
 	float realDamage = a_hitData.totalDamage;
 	inlineUtils::offsetRealDamage(realDamage, a_aggressor, a_victim);
 	auto hitFlag = a_hitData.flags;
 	using HITFLAG = RE::HitData::Flag;
-	if (settings::bAttackStaminaToggle) {
-		if (debuffHandler::GetSingleton()->isInDebuff(a_victim)) {
-			reactionHandler::triggerStagger(a_aggressor, a_victim, reactionHandler::kLargest);
-		}
-	}
+	const bool victimExhausted = attackHandler::enabledFor(a_victim) && debuffHandler::GetSingleton()->isInDebuff(a_victim);
+	if (victimExhausted) reactionHandler::triggerStagger(a_aggressor, a_victim, reactionHandler::kLargest);
 	if (hitFlag.any(HITFLAG::kBlocked)) {
 		blockHandler::GetSingleton()->processPhysicalBlock(a_victim, a_aggressor, hitFlag, a_hitData);
-		if (settings::bBlockedHitRegenStamina && settings::bAttackStaminaToggle) {
-			if (!hitFlag.any(HITFLAG::kPowerAttack)) {
+		if (settings::bBlockedHitRegenStamina && attackHandler::enabledFor(a_aggressor)) {
+			if (!hitFlag.any(HITFLAG::kBash) && !hitFlag.any(HITFLAG::kPowerAttack)) {
 				attackHandler::GetSingleton()->OnLightHit(a_aggressor);
 			}
 		}
@@ -41,13 +45,11 @@ void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::H
 	}
 
 	//from this point on the hit can only be unblocked melee hit.
-	if (settings::bAttackStaminaToggle) {
-		if (!hitFlag.any(HITFLAG::kPowerAttack)) {
-			attackHandler::GetSingleton()->OnLightHit(a_aggressor);
-		}
-		if (debuffHandler::GetSingleton()->isInDebuff(a_victim)) {
-			Utils::Actor::restoreav(a_victim, RE::ActorValue::kStamina, a_victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina) * settings::fMeleeRewardLightHit_Percent);
-		}
+	if (attackHandler::enabledFor(a_aggressor) && !hitFlag.any(HITFLAG::kPowerAttack)) {
+		attackHandler::GetSingleton()->OnLightHit(a_aggressor);
+	}
+	if (victimExhausted) {
+		Utils::Actor::restoreav(a_victim, RE::ActorValue::kStamina, a_victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina) * settings::fMeleeRewardLightHit_Percent);
 	}
 
 	if (stunHandler::GetSingleton()->getIsStunBroken(a_victim) && (!a_hitData.weapon || a_hitData.weapon->IsMelee())) {

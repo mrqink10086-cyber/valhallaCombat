@@ -1,5 +1,6 @@
 #include "include/blockHandler.h"
 #include "include/OwnedEffects.h"
+#include "include/CombatTrace.h"
 #include "include/data.h"
 #include "include/settings.h"
 #include "include/Utils.h"
@@ -28,31 +29,35 @@ void blockHandler::reset()
 	pcHotTimer = 3;
 	pcBlockWindowPenalty = none;
 	init();
+	ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::HANDLER::blockHandler);
 }
 /*Called every frame.
 Decrement the timer for actors either perfect blocking or cooling down.*/
 void blockHandler::update() {
-
+	const float delta = std::max(0.0f, *RE::Offset::g_deltaTime);
+	float blockCooldownDelta = delta;
+	float tackleCooldownDelta = delta;
 	if (isPcTimedBlocking) {
-		pcTimedBlockTimer -= *RE::Offset::g_deltaTime;
+		pcTimedBlockTimer -= delta;
 		if (pcTimedBlockTimer <= 0) {
+			blockCooldownDelta = -pcTimedBlockTimer;
 			onPcTimedBlockEnd();
 		}
 	}
 	if (isPcBlockingCoolDown) {
 		auto pc = RE::PlayerCharacter::GetSingleton();
 		if (pc && !pc->IsBlocking()) {
-			pcTimedBlockCooldownTimer -= *RE::Offset::g_deltaTime;
-			if (pcTimedBlockCooldownTimer <= 0) {
+			pcTimedBlockCooldownTimer -= blockCooldownDelta;
+			while (pcTimedBlockCooldownTimer <= 0 && pcBlockWindowPenalty != none) {
 				pcBlockWindowPenalty_update(pcBlockWindowPenalty, false);
-				pcTimedBlockCooldownTimer = settings::fTimedBlockCooldownTime;
+				pcTimedBlockCooldownTimer += settings::fTimedBlockCooldownTime;
 			}
+			if (pcBlockWindowPenalty == none) isPcBlockingCoolDown = false;
 		}
 	}
 	if (isPcHot) {
-		if (pcHotTimer > 0) {
-			pcHotTimer -= *RE::Offset::g_deltaTime;
-		} else {
+		pcHotTimer -= delta;
+		if (pcHotTimer <= 0) {
 			isPcHot = false;
 			pcHotTimer = 3.f;
 			pcPerfectBlockCountdown = settings::uPerfectBlockAccum;
@@ -61,8 +66,9 @@ void blockHandler::update() {
 
 
 	if (isPcTackling) {
-		pcTackleTimer -= *RE::Offset::g_deltaTime;
+		pcTackleTimer -= delta;
 		if (pcTackleTimer <= 0) {
+			tackleCooldownDelta = -pcTackleTimer;
 			isPcTackling = false;
 			isPcTackleCooldown = true;
 			pcTackleCooldownTimer = settings::fTackleCooldownTime;
@@ -70,12 +76,13 @@ void blockHandler::update() {
 	}
 
 	if (isPcTackleCooldown) {
-		pcTackleCooldownTimer -= *RE::Offset::g_deltaTime;
+		pcTackleCooldownTimer -= tackleCooldownDelta;
 		if (pcTackleCooldownTimer <= 0) {
 			isPcTackleCooldown = false;
 		}
 	}
-	
+	if (!isPcTimedBlocking && !isPcBlockingCoolDown && !isPcHot && !isPcTackling && !isPcTackleCooldown)
+		ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::HANDLER::blockHandler);
 }
 void blockHandler::onPcTimedBlockEnd() {
 	if (!isPcTimedBlockSuccess) {//apply penalty only if the current block is not a successful timed block.
@@ -133,7 +140,7 @@ void blockHandler::onBlockKeyDown() {
 		return;
 	}
 	RE::PlayerCharacter* pc = RE::PlayerCharacter::GetSingleton();
-	if (!Utils::Actor::canBlock(pc)) {
+	if (!pc || !Utils::Actor::canBlock(pc)) {
 		return;
 	}
 	if (isPcTimedBlocking) {
@@ -207,7 +214,7 @@ bool blockHandler::isInBlockAngle(RE::Actor* blocker, RE::TESObjectREFR* a_obj)
 	return (angle <= data::fCombatHitConeAngle && angle >= -data::fCombatHitConeAngle);
 }
 
-bool blockHandler::tryParryProjectile(RE::Actor* a_blocker, RE::Projectile* a_projectile, RE::hkpCollidable* a_projectile_collidable, float a_cost, bool a_forced = false)
+bool blockHandler::tryParryProjectile(RE::Actor* a_blocker, RE::Projectile* a_projectile, RE::hkpCollidable*, float a_cost, bool a_forced = false)
 {
 	if (a_forced || (a_blocker->IsPlayerRef() && getIsPcTimedBlocking())) {
 
@@ -216,13 +223,8 @@ bool blockHandler::tryParryProjectile(RE::Actor* a_blocker, RE::Projectile* a_pr
 		}
 
 		
-		if (Utils::Actor::tryDamageAv(a_blocker, RE::ActorValue::kMagicka, a_cost)) {  //parry only happnens when there's enough magicka.
-			deflectProjectile(a_blocker, a_projectile, a_projectile_collidable);
-		} else {
-			destroyProjectile(a_projectile);
-		}
-		projectileBlockEffects(a_blocker,settings::fTimedBlockProjectileExp);
-		return true;
+		const bool deflect = Utils::Actor::tryDamageAv(a_blocker, RE::ActorValue::kMagicka, a_cost);
+		return queueProjectileBlock(a_blocker, a_projectile, deflect, settings::fTimedBlockProjectileExp);
 	}
 	return false;
 }
@@ -231,9 +233,7 @@ bool blockHandler::tryParryProjectile(RE::Actor* a_blocker, RE::Projectile* a_pr
 bool blockHandler::tryBlockProjectile(RE::Actor* a_blocker, RE::Projectile* a_projectile, float a_cost) 
 {
 	if (Utils::Actor::tryDamageAv(a_blocker, RE::ActorValue::kMagicka, a_cost)) {
-		destroyProjectile(a_projectile);
-		projectileBlockEffects(a_blocker,settings::fBlockProjectileExp);
-		return true;
+		return queueProjectileBlock(a_blocker, a_projectile, false, settings::fBlockProjectileExp);
 	}
 	return false;
 }
@@ -246,9 +246,6 @@ bool blockHandler::processProjectileBlock(RE::Actor* a_blocker, RE::Projectile* 
 	if (pendingProjectiles.contains(projectileHandle)) return true;
 	auto accepted=[this,projectileHandle] {
 		pendingProjectiles.insert(projectileHandle);
-		CombatRuntime::get().schedule(0,[this,projectileHandle,generation=blockGeneration] {
-			if (generation==blockGeneration) pendingProjectiles.erase(projectileHandle);
-		});
 		return true;
 	};
 	bool forced = getIsForcedTimedBlocking(a_blocker) || getIsForcedPerfectBlocking(a_blocker);
@@ -293,75 +290,39 @@ bool blockHandler::processProjectileBlock(RE::Actor* a_blocker, RE::Projectile* 
 	return false;
 }
 
-void blockHandler::projectileBlockEffects(RE::Actor* actor, float experience)
+bool blockHandler::queueProjectileBlock(RE::Actor* actor, RE::Projectile* projectile, bool deflect, float experience)
 {
-	CombatRuntime::get().schedule(0,[handle=actor->GetHandle(),experience] {
-		auto value=handle.get();
-		if (!value || !value->Is3DLoaded() || Utils::Actor::isDead(value.get())) return;
-		if (value->IsPlayerRef()) if (auto player=RE::PlayerCharacter::GetSingleton()) player->AddSkillExperience(RE::ActorValue::kBlock,experience);
-		if (value->IsBlocking()) value->NotifyAnimationGraph("BlockHitStart");
-		GetSingleton()->playBlockEffects(value.get(),nullptr,blockType::timed);
-	});
-}
-
-void blockHandler::deflectProjectile(RE::Actor* a_deflector, RE::Projectile* a_projectile, RE::hkpCollidable* a_projectile_collidable)
-{
-	if (!a_deflector || !a_projectile) {
-		return;
-	}
-	// Deferred: never mutate Havok projectile state synchronously inside vfunc 190.
-	// Ricochet(outer) -> Valhalla -> CIF(inner) share the same hkpAllCdPointCollector;
-	// freeing/retargeting here corrupts the engine's hit iteration (r13=0x200000 fault).
-	// Swallow now (caller skips original), apply deflection on the main thread next tick.
-	auto projectileHandle = a_projectile->GetHandle();
-	auto deflectorHandle = a_deflector->GetHandle();
-		CombatRuntime::get().schedule(0, [projectileHandle, deflectorHandle]() {
-		// Resolve from handles: the raw pointers from the Havok iteration are not safe to reuse.
+	// Havok still owns the collision collector on this stack; mutate projectiles after returning to the owner update.
+	const auto projectileHandle = projectile->GetHandle();
+	return CombatRuntime::get().schedule(0,[this,projectileHandle,actorHandle=actor->GetHandle(),deflect,experience,generation=blockGeneration] {
+#if VC_COMBAT_TRACE
+		VC_TRACE_SCOPE(CombatTrace::EventKind::ProjectileApply, 0, CombatRuntime::get().session());
+#endif
+		if (generation != blockGeneration) return;
+		struct Cleanup {
+			blockHandler& owner; RE::ObjectRefHandle handle; std::uint64_t generation;
+			~Cleanup() { if (generation == owner.blockGeneration) owner.pendingProjectiles.erase(handle); }
+		} cleanup{*this,projectileHandle,generation};
 		auto projectileRef = projectileHandle.get();
-		auto deflectorRef = deflectorHandle.get();
-		auto* projectile = projectileRef ? projectileRef->AsProjectile() : nullptr;
-		auto* deflector = deflectorRef ? deflectorRef->As<RE::Actor>() : nullptr;
-		if (!projectile || !deflector) {
-			return;
+		auto actorRef = actorHandle.get();
+		auto* target = projectileRef ? projectileRef->AsProjectile() : nullptr;
+		if (target) {
+			const auto& rt = target->GetProjectileRuntimeData();
+			if (!rt.flags.any(RE::Projectile::Flags::kDestroyed) && !rt.flags.any(RE::Projectile::Flags::kFading)) {
+				if (!deflect) RE::Offset::destroyProjectile(target);
+				else if (actorRef && target->Is3DLoaded()) {
+					auto shooter = rt.shooter.get();
+					ValhallaUtils::resetProjectileOwner(target,actorRef.get());
+					if (shooter && shooter->Is3DLoaded()) ValhallaUtils::RetargetProjectile(target,shooter.get());
+					else ValhallaUtils::ReflectProjectile(target);
+				}
+			}
 		}
-		if (!projectile->Is3DLoaded()) {
-			return;
-		}
-		const auto& rt = projectile->GetProjectileRuntimeData();
-		if (rt.flags.any(RE::Projectile::Flags::kDestroyed) || rt.flags.any(RE::Projectile::Flags::kFading)) {
-			return;
-		}
-			auto shooterRef = projectile->GetProjectileRuntimeData().shooter.get();
-			auto shooter = shooterRef.get();
-		ValhallaUtils::resetProjectileOwner(projectile, deflector);
-		if (shooter && shooter->Is3DLoaded()) {
-			ValhallaUtils::RetargetProjectile(projectile, shooter);
-		} else {
-			ValhallaUtils::ReflectProjectile(projectile);
-		}
-	});
-}
-
-void blockHandler::destroyProjectile(RE::Projectile* a_projectile)
-{
-	if (!a_projectile) {
-		return;
-	}
-	// Deferred for the same reason as above: destroying inside OnArrowCollision frees
-	// memory the engine/Ricochet/CIF are still iterating. Swallow now, destroy next tick.
-	auto projectileHandle = a_projectile->GetHandle();
-		CombatRuntime::get().schedule(0, [projectileHandle]() {
-		auto projectileRef = projectileHandle.get();
-		auto* projectile = projectileRef ? projectileRef->AsProjectile() : nullptr;
-		if (!projectile) {
-			return;
-		}
-		const auto& rt = projectile->GetProjectileRuntimeData();
-		if (rt.flags.any(RE::Projectile::Flags::kDestroyed) || rt.flags.any(RE::Projectile::Flags::kFading)) {
-			return;
-		}
-		RE::Offset::destroyProjectile(projectile);
-	});
+		if (generation != blockGeneration || !actorRef || !actorRef->Is3DLoaded() || Utils::Actor::isDead(actorRef.get())) return;
+		if (actorRef->IsPlayerRef()) if (auto player=RE::PlayerCharacter::GetSingleton()) player->AddSkillExperience(RE::ActorValue::kBlock,experience);
+		if (actorRef->IsBlocking()) actorRef->NotifyAnimationGraph("BlockHitStart");
+		playBlockEffects(actorRef.get(),nullptr,blockType::timed);
+	}) != 0;
 }
 
 #pragma region Process Block
@@ -467,6 +428,9 @@ bool blockHandler::getIsForcedPerfectBlocking(RE::Actor* a_actor)
 
 
 bool blockHandler::processMeleeTimedBlock(RE::Actor* a_blocker, RE::Actor* a_attacker, bool a_forced, bool a_forcedPerfect) {
+#if VC_COMBAT_TRACE
+	VC_TRACE_SCOPE(CombatTrace::EventKind::TimedBlock, 0, CombatRuntime::get().session());
+#endif
 	if (!isInBlockAngle(a_blocker, a_attacker)) return false;
 
 	if (!a_forced && !a_forcedPerfect) { // perform checks if it's not forced
@@ -541,6 +505,9 @@ bool blockHandler::processMeleeTimedBlock(RE::Actor* a_blocker, RE::Actor* a_att
 	return true;
 }
 bool blockHandler::processMeleeTackle(RE::Actor* a_tackler, RE::Actor* a_attacker) {
+#if VC_COMBAT_TRACE
+	VC_TRACE_SCOPE(CombatTrace::EventKind::Tackle, 0, CombatRuntime::get().session());
+#endif
 	if (!a_tackler->IsPlayerRef()) {
 		return false;
 	}
@@ -559,6 +526,9 @@ bool blockHandler::processMeleeTackle(RE::Actor* a_tackler, RE::Actor* a_attacke
 	return true;
 }
 PRECISION_API::PreHitCallbackReturn blockHandler::precisionPrehitCallbackFunc(const PRECISION_API::PrecisionHitData& a_precisionHitData) {
+#if VC_COMBAT_TRACE
+	VC_TRACE_SCOPE(CombatTrace::EventKind::PrecisionPreHit, 0, CombatRuntime::get().session());
+#endif
 	PRECISION_API::PreHitCallbackReturn ret;
 		if (!CombatRuntime::get().ready() || (!settings::bTimedBlockToggle && !settings::bTackleToggle)) {
 		return ret;

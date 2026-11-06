@@ -6,7 +6,7 @@ VC_SETTING(float,fStaminaRegenMin,10,Stamina,Stamina,"Minimum regeneration",0,10
 VC_SETTING(float,fCombatStaminaRegenMult,1,Stamina,Stamina,"Combat regeneration multiplier",0,20)
 VC_SETTING(float,fBlockingStaminaRegenMult,0.5f,Stamina,Stamina,"Blocking regeneration multiplier",0,20)
 VC_SETTING(float,fStaminaRegenDelay,2,Stamina,Stamina,"Regeneration delay (seconds)",0,60)
-VC_SETTING(bool,bBlockedHitRegenStamina,true,Stamina,Stamina,"Regenerate stamina on blocked hits",0,1)
+VC_SETTING(bool,bBlockedHitRegenStamina,true,Stamina,Stamina,"Blocked light hits grant stamina rewards",0,1)
 VC_SETTING(bool,bBlockStaminaToggle,false,Stamina,Stamina,"Stamina blocking",0,1)
 VC_SETTING(bool,bGuardBreak,true,Stamina,Stamina,"Guard break",0,1)
 VC_SETTING(float,fBckShdStaminaMult_PC_Block_NPC,1,Stamina,Stamina,"Player shield cost multiplier",0,10)

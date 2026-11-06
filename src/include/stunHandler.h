@@ -2,6 +2,8 @@
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 class stunHandler {
 public:
     enum STUNSOURCE { lightAttack, powerAttack, bash, powerBash, timedBlock, parry, counterAttack };
@@ -30,11 +32,16 @@ private:
         bool broken{false}, downed{false}, cleanup{false}, meterOwned{false};
     };
     struct Snapshot { float maximum, current; bool broken; };
+    using SnapshotUpdate = std::pair<RE::ActorHandle, Snapshot>;
     std::unordered_map<RE::ActorHandle, State> states;
     std::mutex snapshotMutex;
     std::unordered_map<RE::ActorHandle, Snapshot> snapshots;
+    std::vector<SnapshotUpdate> snapshotUpdates;
+    std::vector<RE::ActorHandle> snapshotRemovals;
     float flashCountdown{0};
-    void publish();
+    void publish(const RE::ActorHandle&, const State&);
+    void publishBatch();
+    void clearSnapshots();
     void damageStun(RE::Actor*, RE::Actor*, float);
     bool recover(RE::Actor*, State&);
 };

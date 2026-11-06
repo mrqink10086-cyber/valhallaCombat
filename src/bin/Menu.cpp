@@ -55,7 +55,7 @@ const char* translated(const config::Definition& entry)
 {
  static const std::unordered_map<std::string,const char*> labels{
  {"bUIAlert","耗尽提示"},{"bNonCombatStaminaCost","战斗外消耗耐力"},{"fStaminaRegenMult","种族耐力恢复倍率"},{"fStaminaRegenLimit","恢复率上限"},{"fStaminaRegenMin","恢复率下限"},
- {"fCombatStaminaRegenMult","战斗耐力恢复倍率"},{"fBlockingStaminaRegenMult","格挡耐力恢复倍率"},{"fStaminaRegenDelay","恢复延迟（秒）"},{"bBlockedHitRegenStamina","被格挡命中时恢复耐力"},{"bBlockStaminaToggle","耐力格挡"},{"bGuardBreak","耗尽时破防"},
+ {"fCombatStaminaRegenMult","战斗耐力恢复倍率"},{"fBlockingStaminaRegenMult","格挡耐力恢复倍率"},{"fStaminaRegenDelay","恢复延迟（秒）"},{"bBlockedHitRegenStamina","被格挡的轻击获得耐力奖励"},{"bBlockStaminaToggle","耐力格挡"},{"bGuardBreak","耗尽时破防"},
  {"fBckShdStaminaMult_PC_Block_NPC","玩家盾牌格挡消耗倍率"},{"fBckWpnStaminaMult_PC_Block_NPC","玩家武器格挡消耗倍率"},{"fBckShdStaminaMult_NPC_Block_PC","NPC 盾挡玩家消耗倍率"},{"fBckWpnStaminaMult_NPC_Block_PC","NPC 武器挡玩家消耗倍率"},{"fBckShdStaminaMult_NPC_Block_NPC","NPC 盾挡 NPC 消耗倍率"},{"fBckWpnStaminaMult_NPC_Block_NPC","NPC 武器挡 NPC 消耗倍率"},
  {"bAttackStaminaToggle","玩家攻击耐力"},{"bAttackStaminaToggle_NPC","NPC 攻击耐力"},{"bStaminaDebuffToggle","耐力耗尽惩罚"},{"fMeleeCostLightMiss_Point","轻击未命中消耗（点）"},{"fMeleeRewardLightHit_Percent","轻击命中奖励（比例）"},
  {"bBlockProjectileToggle","格挡投射物"},{"bTimedBlockToggle","近战限时格挡"},{"bTackleToggle","强击冲撞"},{"bTimedBlockProjectileToggle","投射物限时格挡"},{"bBlockCommitmentToggle","格挡承诺"},{"fBlockCommitmentTime","格挡承诺（有效实秒）"},{"fTimedBlockWindow","限时格挡窗口（游戏秒）"},{"uPerfectBlockAccum","完美格挡累计次数"},{"fTimedBlockCooldownTime","格挡冷却（游戏秒）"},{"fTimedBlockStaminaCostMult","限时格挡消耗倍率"},{"fTackleWindow","冲撞窗口（游戏秒）"},{"fTackleCooldownTime","冲撞冷却（游戏秒）"},

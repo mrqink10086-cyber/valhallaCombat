@@ -45,7 +45,7 @@ public:
 	
 private:
     std::unordered_set<RE::ObjectRefHandle> pendingProjectiles;
-    void projectileBlockEffects(RE::Actor* actor, float experience);
+    bool queueProjectileBlock(RE::Actor* actor, RE::Projectile* projectile, bool deflect, float experience);
 	enum blockWindowPenaltyLevel {
 		none = 0,
 		light, //70% of regular timing
@@ -178,20 +178,6 @@ private:
 	bool tryParryProjectile(RE::Actor* a_blocker, RE::Projectile* a_projectile, RE::hkpCollidable* a_projectile_collidable, float a_cost, bool a_forced);
 	
 	
-	/// <summary>
-	/// Deflect an incoming projectile back.
-	/// If the projectile has a sender, the projectile will be aimed at the sender.
-	/// </summary>
-	/// <param name="a_deflector">Actor deflecting the projectile</param>
-	/// <param name="a_projectile"></param>
-	/// <param name="a_projectile_collidable"></param>
-	inline void deflectProjectile(RE::Actor* a_deflector, RE::Projectile* a_projectile, RE::hkpCollidable* a_projectile_collidable);
-	
-	/// <summary>
-	/// Destroy the projectile, removing it from the world.
-	/// </summary>
-	/// <param name="a_projectile">Projectile to be destroyed.</param>
-	inline void destroyProjectile(RE::Projectile* a_projectile);
 
 	static const inline RE::BSFixedString gv_bool_force_timed_blocking = "val_bForceTimedBlocking";
 	static const inline RE::BSFixedString gv_bool_force_perfect_blocking = "val_bForcePerfectBlocking";

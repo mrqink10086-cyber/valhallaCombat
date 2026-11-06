@@ -82,6 +82,10 @@ target_include_directories(
 )
 
 target_compile_definitions("${PROJECT_NAME}" PRIVATE NOMINMAX)
+if(VALHALLA_COMBAT_TRACE)
+ file(TO_CMAKE_PATH "${VALHALLA_COMBAT_TRACE_DIR}" combat_trace_dir)
+ target_compile_definitions("${PROJECT_NAME}" PRIVATE VC_COMBAT_TRACE=1 VC_COMBAT_TRACE_DIR="${combat_trace_dir}")
+endif()
 
 set(SKSE_SUPPORT_XBYAK ON)
 

@@ -1,11 +1,32 @@
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
+#include <new>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
+
+namespace {
+std::atomic<bool> trackAllocations{false};
+std::atomic<std::size_t> allocationCount{0};
+}
+
+void* operator new(std::size_t size)
+{
+ if (trackAllocations.load(std::memory_order_relaxed)) allocationCount.fetch_add(1, std::memory_order_relaxed);
+ if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+ throw std::bad_alloc();
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void* operator new[](std::size_t size) { return ::operator new(size); }
+void operator delete[](void* memory) noexcept { ::operator delete(memory); }
+void operator delete(void* memory, std::size_t) noexcept { ::operator delete(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { ::operator delete[](memory); }
 struct CombatRuntime {
  std::vector<std::function<void()>> tasks;
  static CombatRuntime& get() { static CombatRuntime r; return r; }
@@ -22,13 +43,13 @@ struct Actor;
 struct ActorPtr { Actor* actor; Actor* get() const { return actor; } Actor* operator->() const { return actor; } explicit operator bool() const { return actor!=nullptr; } };
 struct ActorHandle { Actor* actor; ActorPtr get() const { return {actor}; } bool operator==(const ActorHandle&) const=default; };
 struct Actor {
- bool loaded=true,dead=false,downed=false;
+ bool loaded=true,dead=false,downed=false,inCombat=true;
  ActorHandle GetHandle() { return {this}; }
  float GetPermanentActorValue(ActorValue) { return 100; }
  float GetActorValue(ActorValue) { return 50; }
  bool Is3DLoaded() { return loaded; } bool IsInKillMove() { return false; }
  Actor* AsActorState() { return this; } bool IsSwimming() { return false; }
- bool IsInCombat() { return true; } bool IsPlayerRef() { return false; } bool IsPlayerTeammate() { return false; }
+ bool IsInCombat() { return inCombat; } bool IsPlayerRef() { return false; } bool IsPlayerTeammate() { return false; }
  void GetGraphVariableBool(const char*,bool& value) { value=downed; }
 };
 namespace Offset { inline float dt=0; inline float* g_deltaTime=&dt; }
@@ -72,7 +93,80 @@ int main() {
 	h->refreshMeter(true); require(TrueHUDUtils::overrides==1);
  settings::bDownedStateToggle=false; target.loaded=false; h->update(0); require(h->pendingCleanup() && target.downed);
  target.loaded=true; h->update(0); require(!h->pendingCleanup() && !target.downed);
+	h->reset();
+	settings::bDownedStateToggle=true;
+	settings::bStunToggle=true;
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+	settings::bStunToggle=false;
+	target.loaded=false;
+	h->update(0);
+	require(h->pendingCleanup() && h->getMaxStun(&target)==1 && target.downed);
+	target.loaded=true;
+	h->update(0);
+	require(!h->pendingCleanup() && h->getMaxStun(&target)==1 && !target.downed);
+	settings::bStunToggle=true;
+	h->reset();
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
  settings::bStunToggle=false; hook=[&] { h->reset(); }; h->update(0);
 	require(h->getMaxStun(&target)==1 && h->getMaxStun(&other)==1 && OwnedEffects::ownership==0 && TrueHUDUtils::overrides==0);
+	settings::bStunToggle=true;
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+	h->update(3.5f); require(std::abs(h->getCurrentStun(&target)-100.f/14)<.0001f);
+	h->update(6.5f); require(h->getMaxStun(&target)==1);
+
+ // Existing-state modifications should update one published entry without allocating a replacement map.
+ std::vector<RE::Actor> population(32);
+ for (auto& actor : population) h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&actor,1);
+ allocationCount.store(0, std::memory_order_relaxed);
+ trackAllocations.store(true, std::memory_order_relaxed);
+ h->modStun(&population.front(), 0.25f);
+ trackAllocations.store(false, std::memory_order_relaxed);
+ const auto updateAllocations = allocationCount.load(std::memory_order_relaxed);
+ std::printf("steady modStun allocations=%zu\n", updateAllocations);
+
+ // Warm reusable batch storage, then measure a frame that changes one published actor.
+ population.front().inCombat = false;
+ for (auto& actor : population) h->modStun(&actor, -49.0f);
+ h->update(3.1f);
+ h->update(0.1f);
+ allocationCount.store(0, std::memory_order_relaxed);
+ trackAllocations.store(true, std::memory_order_relaxed);
+ h->update(0.1f);
+ trackAllocations.store(false, std::memory_order_relaxed);
+ const auto updateFrameAllocations = allocationCount.load(std::memory_order_relaxed);
+ std::printf("steady one-entry update allocations=%zu\n", updateFrameAllocations);
+ std::fflush(stdout);
+
+ // Snapshot readers may run concurrently with owner-thread updates, reset, and cleanup publication.
+ std::atomic<bool> stopReaders{false};
+ std::atomic<bool> invalidSnapshot{false};
+ std::vector<std::thread> readers;
+ for (int i = 0; i < 4; ++i) {
+  readers.emplace_back([&] {
+   while (!stopReaders.load(std::memory_order_relaxed)) {
+    const float current = h->getCurrentStun(&population.front());
+    const float maximum = h->getMaxStun(&population.front());
+    (void)h->getIsStunBroken(&population.front());
+    if (!std::isfinite(current) || current < 0 || current > 100 ||
+        !std::isfinite(maximum) || (maximum != 1 && maximum != 100)) {
+     invalidSnapshot.store(true, std::memory_order_relaxed);
+    }
+   }
+  });
+ }
+ for (int i = 0; i < 10000; ++i) h->modStun(&population.front(), (i & 1) ? 1.0f : -1.0f);
+ h->reset();
+ require(h->getCurrentStun(&population.front()) == 1 && h->getMaxStun(&population.front()) == 1 &&
+         !h->getIsStunBroken(&population.front()));
+ settings::bDownedStateToggle = false;
+ h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+ settings::bStunToggle = false;
+ h->update(0);
+ require(h->getCurrentStun(&target) == 1 && h->getMaxStun(&target) == 1 && !h->getIsStunBroken(&target));
+ stopReaders.store(true, std::memory_order_relaxed);
+ for (auto& reader : readers) reader.join();
+ require(!invalidSnapshot.load(std::memory_order_relaxed));
+ require(updateAllocations == 0);
+ require(updateFrameAllocations == 0);
  std::puts("reentrant damage/reset serialized; unavailable downed graph cleanup retained: PASS");
 }

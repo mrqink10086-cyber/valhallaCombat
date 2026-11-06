@@ -2,6 +2,9 @@
 using EventResult = RE::BSEventNotifyControl;
 class animEventHandler {
 public:
+	static void submit(RE::Actor* actor, std::uint32_t tag);
+	static void flush();
+	static void reset();
     
     public:
 	static void InstallHook()

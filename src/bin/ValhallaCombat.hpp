@@ -1,5 +1,6 @@
 #pragma once
 #include "include/CombatRuntime.h"
+#include "include/CombatTrace.h"
 #include "include/OwnedEffects.h"
 #include "include/debuffHandler.h"
 #include "include/blockHandler.h"
@@ -61,6 +62,9 @@ public:
 
 	/*Runs every frame when game is not paused.*/
 	void update() {
+#if VC_COMBAT_TRACE
+			VC_TRACE_SCOPE(CombatTrace::EventKind::CombatUpdate, 0, CombatRuntime::get().session());
+#endif
 			auto ui = RE::UI::GetSingleton();
 			CombatRuntime::get().update(!ui || ui->GameIsPaused());
 			if (!CombatRuntime::get().ready() || !ui || ui->GameIsPaused()) {

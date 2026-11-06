@@ -3,14 +3,29 @@
 #include "include/reactionHandler.h"
 #include "include/Utils.h"
 #include "include/OwnedEffects.h"
+#include "include/CombatTrace.h"
 
-void stunHandler::publish()
+void stunHandler::publish(const RE::ActorHandle& handle, const State& state)
 {
-    std::unordered_map<RE::ActorHandle, Snapshot> next;
-    for (const auto& [handle, state] : states)
-        if (!state.cleanup) next.emplace(handle, Snapshot{state.maximum, state.current, state.broken});
     std::lock_guard lock(snapshotMutex);
-    snapshots.swap(next);
+    if (state.cleanup) snapshots.erase(handle);
+    else snapshots.insert_or_assign(handle, Snapshot{state.maximum, state.current, state.broken});
+}
+void stunHandler::publishBatch()
+{
+    if (snapshotRemovals.empty() && snapshotUpdates.empty()) return;
+    {
+        std::lock_guard lock(snapshotMutex);
+        for (const auto& handle : snapshotRemovals) snapshots.erase(handle);
+        for (const auto& [handle, snapshot] : snapshotUpdates) snapshots.insert_or_assign(handle, snapshot);
+    }
+    snapshotRemovals.clear();
+    snapshotUpdates.clear();
+}
+void stunHandler::clearSnapshots()
+{
+    std::lock_guard lock(snapshotMutex);
+    snapshots.clear();
 }
 float stunHandler::getCurrentStun(RE::Actor* actor)
 {
@@ -63,7 +78,7 @@ void stunHandler::reset()
         if (actor) recover(actor.get(), state);
     }
     states.clear();
-    publish();
+    clearSnapshots();
 }
 bool stunHandler::pendingCleanup() const
 {
@@ -74,11 +89,8 @@ void stunHandler::refreshMeter(bool enabled)
 {
     if (mutating) return;
     Mutation transaction(*this);
-    std::vector<RE::ActorHandle> handles;
-    for (const auto& [handle,state] : states) handles.push_back(handle);
-    for (auto handle : handles) {
+    for (auto& [handle, state] : states) {
         auto actor=handle.get(); if (!actor) continue;
-        auto& state=states.at(handle);
         if (!enabled) {
             if (std::exchange(state.meterOwned,false)) TrueHUDUtils::revertSpecialMeter(actor.get());
         } else if (state.broken && !state.cleanup && !state.meterOwned) {
@@ -88,18 +100,28 @@ void stunHandler::refreshMeter(bool enabled)
 }
 void stunHandler::update(float delta)
 {
+#if VC_COMBAT_TRACE
+    VC_TRACE_SCOPE(CombatTrace::EventKind::StunUpdate, 0, CombatRuntime::get().session());
+#endif
     if (mutating) return;
     Mutation transaction(*this);
     if (delta < 0) delta = std::max(0.0f, *RE::Offset::g_deltaTime);
     flashCountdown -= delta==0?0:CombatRuntime::get().activeDelta();
     const bool flash = flashCountdown <= 0;
     if (flash) flashCountdown = 0.5f;
-    std::vector<RE::ActorHandle> handles;
-    for (const auto& [handle,state] : states) handles.push_back(handle);
-    for (const auto handle : handles) {
+    snapshotUpdates.clear();
+    snapshotRemovals.clear();
+    for (auto it = states.begin(); it != states.end();) {
+        const auto handle = it->first;
+        auto& state = it->second;
         auto actor = handle.get();
-        if (!actor) { states.erase(handle); continue; }
-        auto& state = states.at(handle);
+        if (!actor) {
+            snapshotRemovals.push_back(handle);
+            it = states.erase(it);
+            continue;
+        }
+        const bool wasCleanup = state.cleanup;
+        const float previousCurrent = state.current;
         if (!settings::bStunToggle || Utils::Actor::isDead(actor.get())) state.cleanup = true;
         if (state.downed && !settings::bDownedStateToggle) {
             if (actor->Is3DLoaded() && !actor->IsInKillMove() && !actor->AsActorState()->IsSwimming()) {
@@ -110,23 +132,36 @@ void stunHandler::update(float delta)
             }
         }
         if (!state.cleanup) {
-            if (state.countdown > 0) state.countdown -= delta;
-            else if (state.broken || !actor->IsInCombat()) {
-                state.current = std::min(state.maximum, state.current + delta / 7 * state.maximum);
+            const float waiting = std::min(std::max(0.0f, state.countdown), delta);
+            state.countdown -= waiting;
+            const float recoveryDelta = delta - waiting;
+            if (recoveryDelta > 0 && (state.broken || !actor->IsInCombat())) {
+                state.current = std::min(state.maximum, state.current + recoveryDelta / 7 * state.maximum);
                 if (state.current >= state.maximum) state.cleanup = true;
             }
         }
         if (state.cleanup) {
-            if (recover(actor.get(), state)) { states.erase(handle); continue; }
+            if (recover(actor.get(), state)) {
+                snapshotRemovals.push_back(handle);
+                it = states.erase(it);
+                continue;
+            }
+            if (!wasCleanup) snapshotRemovals.push_back(handle);
         } else if (flash && state.broken && settings::bUIAlert) {
             TrueHUDUtils::flashActorValue(actor.get(), RE::ActorValue::kHealth);
         }
+        if (!state.cleanup && state.current != previousCurrent)
+            snapshotUpdates.emplace_back(handle, Snapshot{state.maximum, state.current, state.broken});
+        ++it;
     }
-    publish();
+    publishBatch();
     if (states.empty()) ValhallaCombat::GetSingleton()->deactivateUpdate(ValhallaCombat::stunHandler);
 }
 void stunHandler::damageStun(RE::Actor*, RE::Actor* victim, float amount)
 {
+#if VC_COMBAT_TRACE
+    VC_TRACE_SCOPE(CombatTrace::EventKind::StunDamage, 0, CombatRuntime::get().session());
+#endif
     if (!victim || !std::isfinite(amount) || amount <= 0) return;
     const auto handle = victim->GetHandle();
     auto [it, inserted] = states.try_emplace(handle);
@@ -144,7 +179,7 @@ void stunHandler::damageStun(RE::Actor*, RE::Actor* victim, float amount)
         ValhallaUtils::playSound(victim, data::soundStunBreak);
         if (settings::bStunMeterToggle) state.meterOwned=TrueHUDUtils::greyOutSpecialMeter(victim);
     }
-    publish();
+    publish(handle, state);
     if (state.broken && settings::bDownedStateToggle && !state.downed && victim->Is3DLoaded() &&
         !victim->IsInKillMove() && !victim->AsActorState()->IsSwimming() &&
         (data::isRaceType(victim, data::Humanoid) || data::isRaceType(victim, data::Undead))) {
@@ -163,10 +198,13 @@ void stunHandler::modStun(RE::Actor* actor, float amount)
         return;
     }
     Mutation transaction(*this);
-    const auto it = states.find(actor->GetHandle());
+    const auto handle = actor->GetHandle();
+    const auto it = states.find(handle);
     if (it == states.end()) return;
-    it->second.current = std::clamp(it->second.current + amount, 0.0f, it->second.maximum);
-    publish();
+    const float current = std::clamp(it->second.current + amount, 0.0f, it->second.maximum);
+    if (current == it->second.current) return;
+    it->second.current = current;
+    publish(handle, it->second);
 }
 void stunHandler::processStunDamage(STUNSOURCE source, RE::TESObjectWEAP* weapon, RE::Actor* aggressor, RE::Actor* victim, float base)
 {
