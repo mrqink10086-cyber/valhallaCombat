@@ -5,6 +5,7 @@
 #include "include/debuffHandler.h"
 #include "include/blockHandler.h"
 #include "include/stunHandler.h"
+#include "include/executionHandler.h"
 #include "include/balanceHandler.h"
 #include "include/lib/TrueHUDAPI.h"
 #include "include/lib/PrecisionAPI.h"
@@ -71,6 +72,7 @@ public:
 			return;
 		}
 			OwnedEffects::update();
+			executionHandler::GetSingleton()->updatePrompt(CombatRuntime::get().activeDelta());
 			if (update_DebuffHandler) {
 			debuffHandler::GetSingleton()->update();
 		}

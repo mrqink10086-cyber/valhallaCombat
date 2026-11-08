@@ -43,7 +43,9 @@ class executionHandler {
 public:
  static executionHandler* GetSingleton() { static executionHandler handler; return &handler; }
  std::string status() const { return "Ready"; }
+	std::string targetStatus() const { return "No target"; }
 };
+namespace encounters { void load() {} }
 namespace settings {
 namespace facts {
 inline bool TrueHudAPI_Obtained=true,TrueHudAPI_HasSpecialBarControl=true,PrecisionAPI_Obtained=true;

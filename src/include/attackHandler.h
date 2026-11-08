@@ -21,7 +21,6 @@ public:
 	// Settle the previous light miss before registering a non-bash, non-power swing.
 	void cacheAttack(RE::Actor* actor);
 
-	// Reward each light hit and cancel a cached light swing's miss cost.
 	void OnLightHit(RE::Actor* actor);
 	// Charge an outstanding miss on attackStop or before registering the next swing.
 	void checkout(RE::Actor* actor);

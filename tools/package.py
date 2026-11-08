@@ -39,6 +39,9 @@ with tempfile.TemporaryDirectory(prefix="valhalla-package-", dir=ROOT / "build")
             output.write(migrated, "ValhallaCombat.esp")
             output.write(args.dll, "SKSE/Plugins/valhallaCombat.dll")
             output.write(ROOT / "docs/INSTALL-MenuFramework.md", "ValhallaCombat-Install.md")
+            output.write(ROOT / "docs/GAMEPLAY.md", "ValhallaCombat-Gameplay.md")
+            for rule in sorted((ROOT / "config/EnemyClassification").glob("*.ini")):
+                output.write(rule, "SKSE/Plugins/ValhallaCombat/EnemyClassification/" + rule.name)
             output.write(ROOT / "src/include/vendor/MenuFramework/LICENSE", "licenses/SKSE-Menu-Framework-LICENSE.txt")
     with zipfile.ZipFile(args.output) as archive:
         names = archive.namelist()
@@ -46,6 +49,7 @@ with tempfile.TemporaryDirectory(prefix="valhalla-package-", dir=ROOT / "build")
         assert "SKSE/Plugins/ValhallaCombat/Killmoves.ini" in names
         assert "SKSE/Plugins/ValhallaCombat/RaceMapping/Vanilla.ini" in names
         assert "SKSE/Plugins/valhallaCombat.dll" in names
+        assert "SKSE/Plugins/ValhallaCombat/EnemyClassification/00-Example.ini" in names
         assert len(names) == len(set(name.lower() for name in names))
 digest = hashlib.sha256(args.output.read_bytes()).hexdigest()
 args.output.with_suffix(".zip.sha256").write_text(digest + "  " + args.output.name + "\n", encoding="utf-8")

@@ -34,7 +34,7 @@ void attackHandler::OnLightHit(RE::Actor* a_actor) {
 	const auto handle = a_actor->GetHandle();
 	{
 		std::lock_guard lock(mtx);
-		cachedAttackers.erase(handle);
+		if (cachedAttackers.erase(handle)==0) return;
 	}
 	staminaHandler::staminaLightHit(a_actor);
 }

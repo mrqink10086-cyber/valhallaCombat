@@ -4,6 +4,7 @@
 #include "include/Utils.h"
 #include "include/OwnedEffects.h"
 #include "include/CombatTrace.h"
+#include "include/EnemyClassifier.h"
 
 void stunHandler::publish(const RE::ActorHandle& handle, const State& state)
 {
@@ -123,7 +124,7 @@ void stunHandler::update(float delta)
         const bool wasCleanup = state.cleanup;
         const float previousCurrent = state.current;
         if (!settings::bStunToggle || Utils::Actor::isDead(actor.get())) state.cleanup = true;
-        if (state.downed && !settings::bDownedStateToggle) {
+        if (state.downed && (!settings::bDownedStateToggle || !state.broken)) {
             if (actor->Is3DLoaded() && !actor->IsInKillMove() && !actor->AsActorState()->IsSwimming()) {
                 if (reactionHandler::recoverDownedState(actor.get())) {
                     OwnedEffects::remove(actor.get(),OwnedEffects::downed);
@@ -131,14 +132,26 @@ void stunHandler::update(float delta)
                 }
             }
         }
-        if (!state.cleanup) {
+        if (!state.cleanup && state.broken) {
+            const float elapsed=std::min(std::max(0.0f,state.countdown),delta);
+            state.countdown-=elapsed;
+            if (state.countdown<=0) {
+                state.broken=false;
+                state.current=state.maximum;
+                state.resistance=state.protectedTier ? settings::fBossStunResistance : 0;
+                state.resistance=std::max(0.0f,state.resistance-(delta-elapsed));
+                const bool recovered=recover(actor.get(),state);
+                if (recovered && state.resistance<=0) state.cleanup=true;
+            }
+        } else if (!state.cleanup) {
+            state.resistance=std::max(0.0f,state.resistance-delta);
             const float waiting = std::min(std::max(0.0f, state.countdown), delta);
             state.countdown -= waiting;
             const float recoveryDelta = delta - waiting;
-            if (recoveryDelta > 0 && (state.broken || !actor->IsInCombat())) {
+            if (recoveryDelta > 0 && !actor->IsInCombat()) {
                 state.current = std::min(state.maximum, state.current + recoveryDelta / 7 * state.maximum);
-                if (state.current >= state.maximum) state.cleanup = true;
             }
+            if (state.current>=state.maximum && state.resistance<=0 && !state.downed) state.cleanup=true;
         }
         if (state.cleanup) {
             if (recover(actor.get(), state)) {
@@ -166,6 +179,7 @@ void stunHandler::damageStun(RE::Actor*, RE::Actor* victim, float amount)
     const auto handle = victim->GetHandle();
     auto [it, inserted] = states.try_emplace(handle);
     auto& state = it->second;
+    if (!inserted && (state.broken || state.resistance>0 || state.cleanup)) return;
     if (inserted) {
         state.maximum = std::max(1.0f, (victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kHealth) +
             victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina)) / 2);
@@ -176,6 +190,8 @@ void stunHandler::damageStun(RE::Actor*, RE::Actor* victim, float amount)
     state.current = std::max(0.0f, state.current - amount);
     if (!state.broken && state.current <= 0) {
         state.broken = true;
+        state.countdown=settings::fStunBrokenWindow;
+        state.protectedTier=encounters::classify(victim).tier!=encounters::Tier::normal;
         ValhallaUtils::playSound(victim, data::soundStunBreak);
         if (settings::bStunMeterToggle) state.meterOwned=TrueHUDUtils::greyOutSpecialMeter(victim);
     }
@@ -201,6 +217,7 @@ void stunHandler::modStun(RE::Actor* actor, float amount)
     const auto handle = actor->GetHandle();
     const auto it = states.find(handle);
     if (it == states.end()) return;
+    if (it->second.broken || it->second.resistance>0 || it->second.cleanup) return;
     const float current = std::clamp(it->second.current + amount, 0.0f, it->second.maximum);
     if (current == it->second.current) return;
     it->second.current = current;

@@ -28,8 +28,8 @@ private:
         ~Mutation() { owner.mutating=false; if (std::exchange(owner.resetPending,false)) owner.reset(); }
     };
     struct State {
-        float maximum{1}, current{1}, countdown{3};
-        bool broken{false}, downed{false}, cleanup{false}, meterOwned{false};
+        float maximum{1}, current{1}, countdown{3}, resistance{0};
+        bool broken{false}, downed{false}, cleanup{false}, meterOwned{false}, protectedTier{false};
     };
     struct Snapshot { float maximum, current; bool broken; };
     using SnapshotUpdate = std::pair<RE::ActorHandle, Snapshot>;

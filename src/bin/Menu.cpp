@@ -2,6 +2,7 @@
 #include "include/settings.h"
 #include "include/CombatRuntime.h"
 #include "include/executionHandler.h"
+#include "include/EnemyClassifier.h"
 #include <memory>
 #include <unordered_map>
 #pragma warning(push, 0)
@@ -55,6 +56,7 @@ void __stdcall menuEvent(SKSEMenuFramework::Model::EventType event)
 const char* translated(const config::Definition& entry)
 {
  static const std::unordered_map<std::string,const char*> labels{
+	 {"bFollowerAutoExecution","队友自动处决"},{"bExecutionPrompt","处决机会提示"},{"fExecutionHealthThreshold","处决血量阈值（比例）"},{"fStunBrokenWindow","破防窗口（有效实秒）"},{"fBossStunResistance","精英和 Boss 恢复后的破防抗性（秒）"},{"fBossOpeningDamageMult","精英和 Boss 破防期间受伤倍率"},
  {"bUIAlert","耗尽提示"},{"bNonCombatStaminaCost","战斗外消耗耐力"},{"fStaminaRegenMult","种族耐力恢复倍率"},{"fStaminaRegenLimit","恢复率上限"},{"fStaminaRegenMin","恢复率下限"},
  {"fCombatStaminaRegenMult","战斗耐力恢复倍率"},{"fBlockingStaminaRegenMult","格挡耐力恢复倍率"},{"fStaminaRegenDelay","恢复延迟（秒）"},{"bBlockedHitRegenStamina","被格挡的轻击获得耐力奖励"},{"bBlockStaminaToggle","耐力格挡"},{"bGuardBreak","耗尽时破防"},
  {"fBckShdStaminaMult_PC_Block_NPC","玩家盾牌格挡消耗倍率"},{"fBckWpnStaminaMult_PC_Block_NPC","玩家武器格挡消耗倍率"},{"fBckShdStaminaMult_NPC_Block_PC","NPC 盾挡玩家消耗倍率"},{"fBckWpnStaminaMult_NPC_Block_PC","NPC 武器挡玩家消耗倍率"},{"fBckShdStaminaMult_NPC_Block_NPC","NPC 盾挡 NPC 消耗倍率"},{"fBckWpnStaminaMult_NPC_Block_NPC","NPC 武器挡 NPC 消耗倍率"},
@@ -62,7 +64,7 @@ const char* translated(const config::Definition& entry)
  {"bBlockProjectileToggle","格挡投射物"},{"bTimedBlockToggle","近战限时格挡"},{"bTackleToggle","强击冲撞"},{"bTimedBlockProjectileToggle","投射物限时格挡"},{"bBlockCommitmentToggle","格挡承诺"},{"fBlockCommitmentTime","格挡承诺（有效实秒）"},{"fTimedBlockWindow","限时格挡窗口（游戏秒）"},{"uPerfectBlockAccum","完美格挡累计次数"},{"fTimedBlockCooldownTime","格挡冷却（游戏秒）"},{"fTimedBlockStaminaCostMult","限时格挡消耗倍率"},{"fTackleWindow","冲撞窗口（游戏秒）"},{"fTackleCooldownTime","冲撞冷却（游戏秒）"},
  {"fTimedBlockMeleeExp","限时近战格挡经验"},{"fTimedBlockProjectileExp","限时投射物格挡经验"},{"fBlockProjectileExp","投射物格挡经验"},{"iAltBlockKey","替代格挡按键"},{"bTimedBlockScreenShake","格挡屏幕震动"},{"bTimeBlockSFX","格挡音效"},{"fTimedBlockSFXVolume","音量"},{"uTimedBlockSparkType","火花：0 幻想 / 1 写实 / 2 关闭"},{"bTimedBlockSlowTime","格挡慢时间"},{"fTimedBlockSlowTime_Timed","限时慢时间（有效实秒）"},{"fTimedBlockSlowTime_Perfect","完美慢时间（有效实秒）"},
  {"bStunToggle","眩晕与处决"},{"bStunMeterToggle","TrueHUD 眩晕条"},{"bFriendlyStunToggle","队友眩晕"},{"bDownedStateToggle","破防倒地"},{"fStunTimedBlockMult","限时格挡眩晕倍率"},{"fStunParryMult","招架眩晕倍率"},{"fStunBashMult","盾击眩晕倍率"},{"fStunPowerBashMult","强力盾击眩晕倍率"},{"fStunNormalAttackMult","轻击眩晕倍率"},{"fStunPowerAttackMult","强击眩晕倍率"},{"fStunCounterAttackMult","防御反击眩晕倍率"},
- {"fStunUnarmedMult","徒手眩晕倍率"},{"fStunDaggerMult","匕首眩晕倍率"},{"fStunSwordMult","单手剑眩晕倍率"},{"fStunWarAxeMult","战斧眩晕倍率"},{"fStunMaceMult","钉锤眩晕倍率"},{"fStunGreatSwordMult","双手剑眩晕倍率"},{"fStun2HBluntMult","双手钝器眩晕倍率"},{"bAutoExecution","后续命中时自动处决"},{"iExecutionKey","处决按键"},{"bPoiseCompatibility","Poise 兼容"}};
+ {"fStunUnarmedMult","徒手眩晕倍率"},{"fStunDaggerMult","匕首眩晕倍率"},{"fStunSwordMult","单手剑眩晕倍率"},{"fStunWarAxeMult","战斧眩晕倍率"},{"fStunMaceMult","钉锤眩晕倍率"},{"fStunGreatSwordMult","双手剑眩晕倍率"},{"fStun2HBluntMult","双手钝器眩晕倍率"},{"bAutoExecution","自动处决"},{"iExecutionKey","处决按键"},{"bPoiseCompatibility","Poise 兼容"}};
  const auto found=labels.find(entry.name); return chinese() && found!=labels.end()?found->second:entry.label;
 }
 void controls()
@@ -78,7 +80,7 @@ void controls()
  ImGuiMCP::SameLine();
  if (ImGuiMCP::Button(text("Defaults","恢复默认"))) { draft=config::defaults(); dirty=true; binding=-1; }
  ImGuiMCP::SameLine();
- if (ImGuiMCP::Button(text("Reload file","重新读文件"))) { dirty=false; binding=-1; CombatRuntime::get().control([] { settings::readSettings(); }); }
+	 if (ImGuiMCP::Button(text("Reload file","重新读文件"))) { dirty=false; binding=-1; CombatRuntime::get().control([] { settings::readSettings(); encounters::load(); }); }
  if (dirty) ImGuiMCP::TextUnformatted(text("Unsaved changes","有未保存的修改"));
  else if (current.pendingCleanup) ImGuiMCP::TextUnformatted(text("Saved; waiting for active effects to finish.","已保存，正在等待现有效果结束。"));
  if (!current.message.empty() && current.message!="Saved and applied" && current.message!="Settings loaded") ImGuiMCP::TextUnformatted(current.message.c_str());
@@ -128,6 +130,8 @@ void section(const char* page,const char* english,const char* zh)
 {
  ImGuiMCP::Separator(); ImGuiMCP::TextUnformatted(text(english,zh));
  if (std::string_view(page)=="Stun") {
+	  ImGuiMCP::TextWrapped("%s",text("Normal: broken stun OR low health. Elite/Boss: low health only; breaking stun grants a damage opening.","普通敌人：破防或低血量即可处决。精英和 Boss：需要低血量，破防提供增伤窗口。"));
+	  ImGuiMCP::TextWrapped("%s",executionHandler::GetSingleton()->targetStatus().c_str());
   setting(config::Key::iExecutionKey); setting(config::Key::bStunToggle); setting(config::Key::bStunMeterToggle); setting(config::Key::bAutoExecution);
   if (!settings::facts::TrueHudAPI_Obtained || !settings::facts::TrueHudAPI_HasSpecialBarControl)
    ImGuiMCP::TextWrapped("%s",text("Stun meter needs TrueHUD special bar control. Check TrueHUD installation and special bar settings.","眩晕条需要 TrueHUD 特殊条控制权。请检查 TrueHUD 安装和特殊条设置。"));
@@ -164,6 +168,7 @@ void __stdcall diagnostics()
  ImGuiMCP::TextUnformatted(current.message.c_str());
  ImGuiMCP::TextUnformatted(config::store().path().string().c_str());
  ImGuiMCP::TextUnformatted(executionHandler::GetSingleton()->status().c_str());
+	 ImGuiMCP::TextWrapped("%s",executionHandler::GetSingleton()->targetStatus().c_str());
 }
 }
 namespace Menu {

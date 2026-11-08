@@ -31,7 +31,8 @@ void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::H
 		}
 		return;
 	}
-	//from this point on the hit is not blocked/
+	if ((!a_hitData.weapon || a_hitData.weapon->IsMelee()) && std::isfinite(a_hitData.totalDamage) && a_hitData.totalDamage>0)
+		a_hitData.totalDamage*=executionHandler::GetSingleton()->openingDamageMultiplier(a_victim);
 
 	//bash hit
 	if (hitFlag.any(HITFLAG::kBash)) {
@@ -52,16 +53,6 @@ void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::H
 		Utils::Actor::restoreav(a_victim, RE::ActorValue::kStamina, a_victim->AsActorValueOwner()->GetPermanentActorValue(RE::ActorValue::kStamina) * settings::fMeleeRewardLightHit_Percent);
 	}
 
-	if (stunHandler::GetSingleton()->getIsStunBroken(a_victim) && (!a_hitData.weapon || a_hitData.weapon->IsMelee())) {
-		if (a_aggressor->IsPlayerRef()) {
-			if (settings::bAutoExecution) {//player only auto-execute if auto execution is on
-				executionHandler::GetSingleton()->attemptExecute(a_aggressor, a_victim);
-			}
-		}
-		else { //NPC auto-execute always.
-			executionHandler::GetSingleton()->attemptExecute(a_aggressor, a_victim);
-		}
-	}
 	//DEBUG("test execution");
 	//executionHandler::GetSingleton()->playExecutionIdle(aggressor, victim, data::testIdle);
 	if (hitFlag.any(HITFLAG::kPowerAttack)) {
@@ -76,5 +67,6 @@ void hitProcessor::processHit(RE::Actor* a_aggressor, RE::Actor* a_victim, RE::H
 	else {
 		stunHandler::GetSingleton()->processStunDamage(stunHandler::STUNSOURCE::lightAttack, a_hitData.weapon, a_aggressor, a_victim, realDamage);
 	}
+	if (!a_hitData.weapon || a_hitData.weapon->IsMelee()) executionHandler::GetSingleton()->tryAutomatic(a_aggressor,a_victim);
 
 }

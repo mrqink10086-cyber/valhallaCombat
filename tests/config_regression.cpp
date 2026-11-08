@@ -22,7 +22,8 @@ int main()
   config::Store fresh(base/"fresh");
   const bool loaded=fresh.load(values,error); if (!loaded) std::cerr<<error<<'\n';
   check(loaded,"fresh install loads and writes schema");
-  check(config::value(values,config::Key::bBlockedHitRegenStamina)==1 && config::value(values,config::Key::fStunNormalAttackMult)==0,"shipped default and gameplay preserved");
+  check(config::value(values,config::Key::bBlockedHitRegenStamina)==1 && std::abs(config::value(values,config::Key::fStunNormalAttackMult)-0.3)<0.000001 &&
+    config::value(values,config::Key::fStunParryMult)==1.5 && config::value(values,config::Key::fStunCounterAttackMult)==1.5,"fresh combat defaults");
   check(contents(fresh.path()).find("Schema = 1")!=std::string::npos,"canonical file marked with schema");
   check(contents(fresh.path()).find("fMeleeCostHeavy")==std::string::npos,"native heavy costs expose no custom ratio settings");
   const auto root=base/"legacy"; config::Store legacy(root);
@@ -30,12 +31,14 @@ int main()
   file(legacy.path(),"[Stun]\nfStunPowerAttackMult=3\n");
   file(root/"MCM/Settings/ValhallaCombat.ini","[Stamina]\nfMeleeCostHeavyMiss_Percent=.5\nfMeleeCostHeavyHit_Percent=.25\n[Stun]\nfStunPowerAttackMult=4\nfStunNormalAttackMult=nan\n");
   check(legacy.load(values,error) && config::value(values,config::Key::fStunPowerAttackMult)==4,"legacy precedence defaults-SKSE-MCM");
-  check(fs::exists(legacy.path().string()+".legacy.bak") && config::value(values,config::Key::fStunNormalAttackMult)==0,"legacy backup and invalid key fallback");
+  check(fs::exists(legacy.path().string()+".legacy.bak") && std::abs(config::value(values,config::Key::fStunNormalAttackMult)-0.3)<0.000001,"legacy backup and invalid key fallback");
   check(contents(legacy.path()).find("fMeleeCostHeavy")==std::string::npos,"retired heavy ratios are ignored during migration");
   file(root/"MCM/Settings/ValhallaCombat.ini","[Stun]\nfStunPowerAttackMult=9\n");
   check(legacy.load(values,error) && config::value(values,config::Key::fStunPowerAttackMult)==4,"schema prevents repeat migration");
-  file(legacy.path(),"[Meta]\nSchema=1\n[Stamina]\nfMeleeCostHeavyMiss_Percent=.5\nfMeleeCostHeavyHit_Percent=.25\n[Stun]\nfStunPowerAttackMult=4\n");
-  check(legacy.load(values,error) && config::value(values,config::Key::fStunPowerAttackMult)==4,"existing schema accepts retired heavy keys without affecting other settings");
+  file(legacy.path(),"[Meta]\nSchema=1\n[Stamina]\nfMeleeCostHeavyMiss_Percent=.5\nfMeleeCostHeavyHit_Percent=.25\n[Stun]\nfStunPowerAttackMult=4\nfStunNormalAttackMult=0\nfStunParryMult=1\nfStunCounterAttackMult=1.2\n");
+  check(legacy.load(values,error) && config::value(values,config::Key::fStunPowerAttackMult)==4 &&
+    config::value(values,config::Key::fStunNormalAttackMult)==0 && config::value(values,config::Key::fStunParryMult)==1 &&
+    std::abs(config::value(values,config::Key::fStunCounterAttackMult)-1.2)<0.000001,"existing multipliers preserved while retired heavy keys are ignored");
   auto revision=legacy.snapshot().saved;
   put(values,config::Key::fStunPowerAttackMult,5);
   check(legacy.save(values,revision,error),"valid draft saved atomically");

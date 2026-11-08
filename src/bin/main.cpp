@@ -15,6 +15,7 @@
 #include "include/OwnedEffects.h"
 #include "include/CombatTrace.h"
 #include "include/CombatSelfTest.h"
+#include "include/EnemyClassifier.h"
 void endCombatSession();
 namespace {
 bool hooksInstalled = false;
@@ -71,6 +72,7 @@ void onDataLoaded()
 	events::registerAllEventHandlers();
 	if (auto ui=RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&menuLifecycle);
 	data::loadData();
+	encounters::load();
 	blockHandler::GetSingleton()->init();
 	blockHandler::EldenCounterCompatibility::attemptInit(); //todo: fix this jank
 	hooksInstalled = Hooks::install();

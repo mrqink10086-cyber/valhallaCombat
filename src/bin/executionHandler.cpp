@@ -4,119 +4,126 @@
 #include "include/stunHandler.h"
 #include "include/Utils.h"
 #include "include/CombatTrace.h"
+#include "include/EnemyClassifier.h"
 #define DATA data::GetSingleton()
 using namespace inlineUtils;
+namespace {
+void notifyExecution(const char* message)
+{
+    if (auto vm=RE::BSScript::Internal::VirtualMachine::GetSingleton()) {
+        RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result;
+        vm->DispatchStaticCall("Debug","Notification",RE::MakeFunctionArguments(RE::BSFixedString(message)),result);
+    }
+}
+}
 void executionHandler::tryPcExecution() {
 	if (!CombatRuntime::get().ready()) return;
-	report("No eligible execution target in range");
-
-	auto pc = RE::PlayerCharacter::GetSingleton();
-	if (!pc) {
-		return;
-	}
-		std::vector<std::pair<float, RE::ActorHandle>> candidates;
-
-	for (auto& handle : stunHandler::GetSingleton()->getStunBrokenActors()) {
-		if (!handle) {
-			continue;
-		}
-			auto actorRef = handle.get();
-			auto actor = actorRef.get();
-		
-		if (!actor || !actor->Is3DLoaded() || Utils::Actor::isDead(actor) || actor->IsInKillMove() ||
-			!actor->GetActorRuntimeData().currentProcess || !actor->GetActorRuntimeData().currentProcess->InHighProcess()) {
-				continue;
-		}
-		float dist = pc->GetPosition().GetDistance(actor->GetPosition());
-		if (dist < 250) {
-				candidates.emplace_back(dist, handle);
-		}
-	}
-	
-		std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-		for (const auto& candidate : candidates) {
-			auto actor = candidate.second.get();
-			if (actor && attemptExecute(pc, actor.get())) break;
-		}
-
-}
-bool executionHandler::attemptExecute(RE::Actor* a_executor, RE::Actor* a_victim) {
-#if VC_COMBAT_TRACE
-	VC_TRACE_SCOPE(CombatTrace::EventKind::Execution, 0, CombatRuntime::get().session());
-#endif
-	//check if victim can be executed
-		if (!CombatRuntime::get().ready() || !a_executor || !a_victim || !settings::bStunToggle
-		|| !Utils::Actor::isHumanoid(a_executor) || Utils::Actor::isDead(a_executor) || Utils::Actor::isDead(a_victim)
-		|| !a_executor->Is3DLoaded() || !a_victim->Is3DLoaded()
-		|| a_executor->IsInKillMove() || a_victim->IsInKillMove()
-		|| a_executor->IsOnMount() || a_victim->IsOnMount()
-		|| a_victim->IsPlayerRef() || a_victim->IsPlayerTeammate()
-		|| a_victim->IsEssential() || a_victim->IsInKillMove() || a_victim->AsMagicTarget()->HasEffectWithArchetype(RE::MagicTarget::Archetype::kParalysis)) {
-		//logger::info("Execution preconditions not met, terminating execution.");
-		return false;
-	}
-
-		if (!stunHandler::GetSingleton()->getIsStunBroken(a_victim) || pending.contains(a_executor->GetHandle()) || pending.contains(a_victim->GetHandle())) return false;
-		auto victimRace = a_victim->GetRace();
-	if (!victimRace) {
-		return false;
-	}
-	
-	auto it2 = data::raceMapping.find(victimRace);
-	if (it2 == data::raceMapping.end()) {
-		report("Rejected: target race has no execution mapping");
-		return false;
-	}
-	auto victimRaceType = it2->second;
-
-	RE::WEAPON_TYPE weaponType;
-	auto weapon = Utils::Actor::getWieldingWeapon(a_executor);
-	if (!weapon) {
-		//logger::info("Executor weapon not found, using unarmed as weapon type.");
-		weaponType = RE::WEAPON_TYPE::kHandToHandMelee;
-	}
+	auto player=RE::PlayerCharacter::GetSingleton();
+	auto target=selectTarget(player);
+	if (target) attemptExecute(player,target);
 	else {
-		weaponType = weapon->GetWeaponType();
+		report("No eligible target in front: check health/stun, range, protection and weapon support");
+		notifyExecution(settings::bMenuChinese ? "前方没有可处决目标，请检查血量、破防、距离与动作支持" : "No eligible execution target in front");
 	}
-
-	if (weaponType == RE::WEAPON_TYPE::kBow || weaponType == RE::WEAPON_TYPE::kCrossbow) {
-		//logger::info("long range weapon");
-		return false;
-	}
-
-	//logger::info("weapon type is {}", weaponType);
-#define RACE data::raceCatagory
-		const auto before = queued;
-		switch (victimRaceType) {
-	case RACE::Humanoid: executeHumanoid(a_executor, a_victim, weaponType); break;
-	case RACE::Undead: executeDraugr(a_executor, a_victim, weaponType); break;
-	case RACE::Falmer: executeFalmer(a_executor, a_victim, weaponType); break;
-	case RACE::Spider: executeSpider(a_executor, a_victim, weaponType); break;
-	case RACE::Gargoyle: executeGargoyle(a_executor, a_victim, weaponType); break;
-	case RACE::Giant: executeGiant(a_executor, a_victim, weaponType); break;
-	case RACE::Bear: executeBear(a_executor, a_victim, weaponType); break;
-	case RACE::SabreCat: executeSabreCat(a_executor, a_victim, weaponType); break;
-	case RACE::Wolf: executeWolf(a_executor, a_victim, weaponType); break;
-	case RACE::Troll: executeTroll(a_executor, a_victim, weaponType); break;
-	case RACE::Boar: executeBoar(a_executor, a_victim, weaponType); break;
-	case RACE::Hagraven: executeHagraven(a_executor, a_victim, weaponType); break;
-	case RACE::Spriggan: executeSpriggan(a_executor, a_victim, weaponType); break;
-	case RACE::Riekling: executeRiekling(a_executor, a_victim, weaponType); break;
-	case RACE::AshHopper: executeAshHopper(a_executor, a_victim, weaponType); break;
-	case RACE::SteamCenturion: executeSteamCenturion(a_executor, a_victim, weaponType); break;
-	case RACE::DwarvenBallista: executeDwarvenBallista(a_executor, a_victim, weaponType); break;
-	case RACE::ChaurusFlyer: executeChaurusFlyer(a_executor, a_victim, weaponType); break;
-	case RACE::Lurker: executeLurker(a_executor, a_victim, weaponType); break;
-	case RACE::Dragon: executeDragon(a_executor, a_victim, weaponType); break;
-	default: return false; //iff no body part match, no need to set ghost.
-	}
-		if (queued==before) report("Rejected: no supported idle for this race and weapon");
-		return queued != before;
-};
+}
+executionHandler::Eligibility executionHandler::evaluate(RE::Actor* executor,RE::Actor* victim,bool checkPending)
+{
+    if (!CombatRuntime::get().ready() || !settings::bStunToggle || !executor || !victim || executor==victim)
+        return {false,"Execution disabled or no target"};
+    if (!Utils::Actor::isHumanoid(executor) || Utils::Actor::isDead(executor) || Utils::Actor::isDead(victim) ||
+        !executor->Is3DLoaded() || !victim->Is3DLoaded() || executor->IsInKillMove() || victim->IsInKillMove() ||
+        executor->IsOnMount() || victim->IsOnMount()) return {false,"Actor state prevents execution"};
+    if (victim->IsPlayerRef() || victim->IsPlayerTeammate() || victim->IsEssential() ||
+        (victim->IsProtected() && !executor->IsPlayerRef()) || victim->IsChild()) return {false,"Protected target"};
+    if (!executor->IsHostileToActor(victim)) return {false,"Target is not hostile"};
+    if (checkPending && (pending.contains(executor->GetHandle()) || pending.contains(victim->GetHandle())))
+        return {false,"Execution already pending"};
+    if (victim->AsMagicTarget()->HasEffectWithArchetype(RE::MagicTarget::Archetype::kParalysis)) return {false,"Target is paralyzed"};
+    auto a=executor->GetActorRuntimeData().currentProcess, b=victim->GetActorRuntimeData().currentProcess;
+    if (!a || !b || !a->InHighProcess() || !b->InHighProcess()) return {false,"Actors not in high process"};
+    if (executor->GetPosition().GetDistance(victim->GetPosition())>=250 ||
+        executor->GetHeadingAngle(victim->GetPosition(),true)>70) return {false,"Target out of range or behind executor"};
+    bool unknown=false;
+    if (!executor->HasLineOfSight(victim,unknown)) return {false,"No line of sight"};
+    const auto tier=encounters::classify(victim).tier;
+    const float maximum=victim->GetActorValueMax(RE::ActorValue::kHealth);
+    const float health=victim->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+    const float fraction=maximum>0 && std::isfinite(maximum) ? health/maximum : 2.0f;
+    if (!encounters::canFinish(tier,stunHandler::GetSingleton()->getIsStunBroken(victim),fraction,settings::fExecutionHealthThreshold))
+        return {false,tier==encounters::Tier::normal ? "Requires broken stun or low health" : "Elite/boss requires low health"};
+    const auto idles=idlesFor(executor,victim);
+    if (!idles || std::none_of(idles->begin(),idles->end(),[](auto idle) { return idle!=nullptr; }))
+        return {false,"No supported idle for this race and weapon"};
+    return {true,"Ready for execution"};
+}
+bool executionHandler::attemptExecute(RE::Actor* executor,RE::Actor* victim)
+{
+    const auto eligibility=evaluate(executor,victim);
+    report(eligibility.reason);
+    if (!eligibility.allowed) return false;
+    const auto before=queued;
+    queueExecutionIdle(executor,victim,*idlesFor(executor,victim),1);
+    return queued!=before;
+}
+bool executionHandler::tryAutomatic(RE::Actor* executor,RE::Actor* victim)
+{
+    if (!executor || (executor->IsPlayerRef() ? !settings::bAutoExecution :
+        executor->IsPlayerTeammate() && !settings::bFollowerAutoExecution)) return false;
+    return attemptExecute(executor,victim);
+}
+float executionHandler::openingDamageMultiplier(RE::Actor* victim)
+{
+    return settings::bStunToggle && stunHandler::GetSingleton()->getIsStunBroken(victim) &&
+        encounters::classify(victim).tier!=encounters::Tier::normal ? settings::fBossOpeningDamageMult : 1.0f;
+}
+RE::Actor* executionHandler::selectTarget(RE::Actor* player)
+{
+    if (!player) return nullptr;
+    if (auto crosshair=RE::CrosshairPickData::GetSingleton()) {
+        auto reference=crosshair->GetActiveTarget().get();
+        auto actor=reference ? reference->As<RE::Actor>() : nullptr;
+        if (evaluate(player,actor).allowed) return actor;
+    }
+    RE::Actor* selected=nullptr;
+    float best=std::numeric_limits<float>::max();
+    if (auto processes=RE::ProcessLists::GetSingleton()) processes->ForEachHighActor([&](RE::Actor* actor) {
+        if (evaluate(player,actor).allowed) {
+            const float score=std::abs(player->GetHeadingAngle(actor->GetPosition(),true))*4+
+                player->GetPosition().GetDistance(actor->GetPosition());
+            if (score<best) { best=score; selected=actor; }
+        }
+        return RE::BSContainer::ForEachResult::kContinue;
+    });
+    return selected;
+}
+void executionHandler::updatePrompt(float delta)
+{
+    promptCountdown-=delta;
+    if (promptCountdown>0) return;
+    promptCountdown=0.25f;
+    auto player=RE::PlayerCharacter::GetSingleton();
+    auto eligible=selectTarget(player);
+    RE::Actor* diagnostic=eligible;
+    if (!diagnostic) if (auto crosshair=RE::CrosshairPickData::GetSingleton()) {
+        auto reference=crosshair->GetActiveTarget().get();
+        diagnostic=reference ? reference->As<RE::Actor>() : nullptr;
+    }
+    std::string info="No target";
+    if (diagnostic) info=fmt::format("{}: {} / {}",diagnostic->GetName(),encounters::describe(encounters::classify(diagnostic)),evaluate(player,diagnostic).reason);
+    { std::lock_guard lock(statusMutex); targetInfo=std::move(info); }
+    const auto handle=eligible ? eligible->GetHandle() : RE::ActorHandle{};
+    if (eligible && handle!=promptTarget && settings::bExecutionPrompt) {
+        const char* hint=settings::iExecutionKey<0 ?
+            (settings::bMenuChinese ? "可处决：请在设置中绑定处决键" : "Execution available: bind the execution key in settings") :
+            (settings::bMenuChinese ? "可处决：按已绑定的处决键" : "Execution available: press your execution key");
+        notifyExecution(hint);
+    }
+    promptTarget=handle;
+}
 
 void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim, RE::TESIdleForm* idle, int = 1)
 {
-	if (!CombatRuntime::get().ready() || !executor || !victim || !idle) return;
+	if (!idle || !evaluate(executor,victim).allowed) return;
 	const auto a = executor->GetHandle(), b = victim->GetHandle();
 	if (pending.contains(a) || pending.contains(b)) return;
 	const auto race = victim->GetRace();
@@ -130,12 +137,7 @@ void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim
 			if (!keepPending) { self->pending.erase(a); self->pending.erase(b); }
 		});
 		report("Cancelled: execution preconditions changed before playback");
-		if (!attacker || !target || Utils::Actor::isDead(attacker.get()) || Utils::Actor::isDead(target.get()) ||
-			!settings::bStunToggle || !stunHandler::GetSingleton()->getIsStunBroken(target.get()) ||
-			!attacker->Is3DLoaded() || !target->Is3DLoaded() || attacker->IsInKillMove() || target->IsInKillMove() ||
-			attacker->IsOnMount() || target->IsOnMount() || target->IsEssential() || target->IsPlayerTeammate() || target->IsPlayerRef() ||
-			target->AsMagicTarget()->HasEffectWithArchetype(RE::MagicTarget::Archetype::kParalysis) || target->GetRace() != race ||
-			attacker->GetPosition().GetDistance(target->GetPosition()) >= 250) return;
+		if (!attacker || !target || !evaluate(attacker.get(),target.get(),false).allowed || target->GetRace()!=race) return;
 		auto process = attacker->GetActorRuntimeData().currentProcess;
 		auto targetProcess = target->GetActorRuntimeData().currentProcess;
 		auto currentWeapon = Utils::Actor::getWieldingWeapon(attacker.get());
@@ -157,184 +159,59 @@ void executionHandler::queueExecutionIdle(RE::Actor* executor, RE::Actor* victim
 	queueExecutionIdle(executor, victim, *inlineUtils::select_randomly(idles.begin(), idles.end()), i);
 }
 
-
-void executionHandler::executeHumanoid(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE a_weaponType) {
-	//logger::info("executing humanoid!");
-	if (Utils::Actor::isDualWielding(a_executor)) {
-		//logger::info("dual wielding!");
-		queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_DW);
-	}
-	else if (Utils::Actor::isBackFacing(a_victim, a_executor)) {
-		//logger::info("backstab!");
-		switch (a_weaponType) {
-		case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_2hw_Back); break;
-		case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_2hm_Back); break;
-		case RE::WEAPON_TYPE::kHandToHandMelee: queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_H2H_Back); break;
-		default: queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_1hm_Back); break;
-		}
-	}
-	else {
-		switch (a_weaponType) {
-		case RE::WEAPON_TYPE::kOneHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_Sword); break;
-		case RE::WEAPON_TYPE::kOneHandDagger: queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_Dagger); break;
-		case RE::WEAPON_TYPE::kOneHandAxe:  queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_Axe); break;
-		case RE::WEAPON_TYPE::kOneHandMace:  queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_Mace); break;
-		case RE::WEAPON_TYPE::kTwoHandAxe:  queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_2hw); break;
-		case RE::WEAPON_TYPE::kTwoHandSword:  queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_GreatSword); break;
-		case RE::WEAPON_TYPE::kHandToHandMelee:  queueExecutionIdle(a_executor, a_victim, data::KM_Humanoid_H2H); break;
-		}
-	}
-};
-void executionHandler::executeDraugr(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Undead_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Undead_2hm); break;
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Undead_1hm); break;
-	}
-};
-void executionHandler::executeFalmer(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Falmer_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Falmer_2hm); break;
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Falmer_1hm);
-	}
-};
-void executionHandler::executeSpider(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Spider_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Spider_2hm); break;
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Spider_1hm);
-	}
+const std::vector<RE::TESIdleForm*>* executionHandler::idlesFor(RE::Actor* executor,RE::Actor* victim)
+{
+    const auto found=data::raceMapping.find(victim->GetRace());
+    if (found==data::raceMapping.end()) return nullptr;
+    auto weapon=Utils::Actor::getWieldingWeapon(executor);
+    if (weapon && !weapon->IsMelee()) return nullptr;
+    const auto type=weapon ? weapon->GetWeaponType() : RE::WEAPON_TYPE::kHandToHandMelee;
+    if (type==RE::WEAPON_TYPE::kBow || type==RE::WEAPON_TYPE::kCrossbow) return nullptr;
+    using W=RE::WEAPON_TYPE;
+    if (found->second==data::Humanoid) {
+        if (Utils::Actor::isDualWielding(executor)) return &data::KM_Humanoid_DW;
+        if (Utils::Actor::isBackFacing(victim,executor)) {
+            switch (type) {
+            case W::kTwoHandAxe: return &data::KM_Humanoid_2hw_Back;
+            case W::kTwoHandSword: return &data::KM_Humanoid_2hm_Back;
+            case W::kHandToHandMelee: return &data::KM_Humanoid_H2H_Back;
+            default: return &data::KM_Humanoid_1hm_Back;
+            }
+        }
+        switch (type) {
+        case W::kOneHandSword: return &data::KM_Humanoid_Sword;
+        case W::kOneHandDagger: return &data::KM_Humanoid_Dagger;
+        case W::kOneHandAxe: return &data::KM_Humanoid_Axe;
+        case W::kOneHandMace: return &data::KM_Humanoid_Mace;
+        case W::kTwoHandAxe: return &data::KM_Humanoid_2hw;
+        case W::kTwoHandSword: return &data::KM_Humanoid_GreatSword;
+        case W::kHandToHandMelee: return &data::KM_Humanoid_H2H;
+        default: return nullptr;
+        }
+    }
+    if (type==W::kHandToHandMelee) return nullptr;
+#define VC_IDLE_POOL(race,prefix) case data::race: return type==W::kTwoHandAxe ? &data::prefix##_2hw : type==W::kTwoHandSword ? &data::prefix##_2hm : &data::prefix##_1hm;
+    switch (found->second) {
+    VC_IDLE_POOL(Undead,KM_Undead)
+    VC_IDLE_POOL(Falmer,KM_Falmer)
+    VC_IDLE_POOL(Spider,KM_Spider)
+    VC_IDLE_POOL(Gargoyle,KM_Gargoyle)
+    VC_IDLE_POOL(Giant,KM_Giant)
+    VC_IDLE_POOL(Bear,KM_Bear)
+    VC_IDLE_POOL(SabreCat,KM_SabreCat)
+    VC_IDLE_POOL(Wolf,KM_Wolf)
+    VC_IDLE_POOL(Troll,KM_Troll)
+    VC_IDLE_POOL(Hagraven,KM_Hagraven)
+    VC_IDLE_POOL(Spriggan,KM_Spriggan)
+    VC_IDLE_POOL(Boar,KM_Boar)
+    VC_IDLE_POOL(Riekling,KM_Riekling)
+    VC_IDLE_POOL(AshHopper,KM_AshHopper)
+    VC_IDLE_POOL(SteamCenturion,KM_Centurion)
+    VC_IDLE_POOL(DwarvenBallista,KM_Ballista)
+    VC_IDLE_POOL(ChaurusFlyer,KM_ChaurusFlyer)
+    VC_IDLE_POOL(Lurker,KM_Lurker)
+    VC_IDLE_POOL(Dragon,KM_Dragon)
+    default: return nullptr;
+    }
+#undef VC_IDLE_POOL
 }
-void executionHandler::executeGargoyle(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Gargoyle_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Gargoyle_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Gargoyle_1hm); break;
-	}
-}
-void executionHandler::executeGiant(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Giant_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Giant_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Giant_1hm); break;
-	}
-}
-void executionHandler::executeBear(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Bear_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Bear_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Bear_1hm); break;
-	}
-}
-void executionHandler::executeSabreCat(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_SabreCat_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_SabreCat_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_SabreCat_1hm); break;
-	}
-}
-void executionHandler::executeWolf(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Wolf_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Wolf_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Wolf_1hm); break;
-	}
-}
-void executionHandler::executeTroll(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Troll_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Troll_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Troll_1hm); break;
-	}
-}
-void executionHandler::executeHagraven(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Hagraven_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Hagraven_2hm);  break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Hagraven_1hm); break;
-	}
-}
-void executionHandler::executeSpriggan(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Spriggan_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Spriggan_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Spriggan_1hm); break;
-	}
-}
-void executionHandler::executeBoar(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Boar_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Boar_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Boar_1hm); break;
-	}
-}
-void executionHandler::executeRiekling(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Riekling_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Riekling_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Riekling_1hm); break;
-	}
-}
-void executionHandler::executeAshHopper(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_AshHopper_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_AshHopper_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_AshHopper_1hm); break;
-	}
-}
-void executionHandler::executeSteamCenturion(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Centurion_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Centurion_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Centurion_1hm); break;
-	}
-}
-void executionHandler::executeDwarvenBallista(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Ballista_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Ballista_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Ballista_1hm); break;
-	}
-}
-void executionHandler::executeChaurusFlyer(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_ChaurusFlyer_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_ChaurusFlyer_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_ChaurusFlyer_1hm); break;
-	}
-}
-void executionHandler::executeLurker(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Lurker_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Lurker_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Lurker_1hm); break;
-	}
-}
-void executionHandler::executeDragon(RE::Actor* a_executor, RE::Actor* a_victim, RE::WEAPON_TYPE weaponType) {
-	switch (weaponType) {
-	case RE::WEAPON_TYPE::kHandToHandMelee: break;
-	case RE::WEAPON_TYPE::kTwoHandAxe: queueExecutionIdle(a_executor, a_victim, data::KM_Dragon_2hw); break;
-	case RE::WEAPON_TYPE::kTwoHandSword: queueExecutionIdle(a_executor, a_victim, data::KM_Dragon_2hm); break;
-	default: queueExecutionIdle(a_executor, a_victim, data::KM_Dragon_1hm); break;
-	}
-}
-

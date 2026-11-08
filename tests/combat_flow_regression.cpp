@@ -177,12 +177,15 @@ public:
 	enum class STUNSOURCE { powerBash, bash, counterAttack, powerAttack, lightAttack };
 	static stunHandler* GetSingleton() { static stunHandler instance; return &instance; }
 	bool getIsStunBroken(RE::Actor*) const { return false; }
-	void processStunDamage(STUNSOURCE, RE::Weapon*, RE::Actor*, RE::Actor*, float) {}
+	inline static float lastBase{};
+	void processStunDamage(STUNSOURCE, RE::Weapon*, RE::Actor*, RE::Actor*, float base) { lastBase=base; }
 };
 class executionHandler {
 public:
 	static executionHandler* GetSingleton() { static executionHandler instance; return &instance; }
-	void attemptExecute(RE::Actor*, RE::Actor*) {}
+	bool tryAutomatic(RE::Actor*, RE::Actor*) { return false; }
+	inline static float openingMultiplier=1;
+	float openingDamageMultiplier(RE::Actor*) { return openingMultiplier; }
 };
 namespace data { inline constexpr const char* GraphBool_IsGuardCountering = "bIsGuardCountering"; }
 namespace inlineUtils { inline void offsetRealDamage(float&, RE::Actor*, RE::Actor*) {} }
@@ -237,7 +240,7 @@ int main()
 					attacks->checkout(&actor);
 					require(staminaHandler::missedSwings == missesBefore, "a rewarded hit cannot later charge a miss");
 					attacks->OnLightHit(&actor);
-					require(staminaHandler::hitRewards == hitsBefore + (expected ? 2 : 0), "each successful light hit grants its documented reward");
+					require(staminaHandler::hitRewards == hitsBefore + (expected ? 1 : 0), "one swing rewards stamina only once");
 					require(staminaHandler::missedSwings == missesBefore, "multiple successful hits do not create a pending miss charge");
 					attacks->cacheAttack(&actor);
 					attacks->checkout(&actor);
@@ -301,7 +304,7 @@ int main()
 		hitProcessor processor;
 		processor.processHit(&attacker, &victim, hit);
 		processor.processHit(&attacker, &victim, hit);
-		require(staminaHandler::hitRewards == 2 && attacker.values.stamina == 90.0f, "each owner-thread light hit after preHitFrame receives its reward");
+		require(staminaHandler::hitRewards == 1 && attacker.values.stamina == 70.0f, "multiple hit callbacks for one swing grant one reward");
 		require(victim.values.stamina == 50.0f && reactionHandler::staggers == 2, "each hit on an exhausted victim runs its stamina reward and stagger path");
 		const auto missesBeforeStop = staminaHandler::missedSwings;
 			const auto schedulesBeforeOwnerSubmit = CombatRuntime::get().scheduleCount();
@@ -373,6 +376,14 @@ int main()
 				}
 			}
 		}
+		executionHandler::openingMultiplier=1.5f;
+		RE::HitData openingHit;
+		openingHit.totalDamage=12.0f;
+		openingHit.weapon=&weapon;
+		processor.processHit(&powerActor,&powerVictim,openingHit);
+		require(openingHit.totalDamage==18.0f && stunHandler::lastBase==12.0f,
+			"a broken opening increases health damage without feeding the bonus into stun damage");
+		executionHandler::openingMultiplier=1;
 		return 0;
 	} catch (const std::exception& exception) {
 		std::cerr << "FAIL " << exception.what() << '\n';

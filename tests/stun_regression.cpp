@@ -10,6 +10,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "include/EnemyRules.h"
 
 namespace {
 std::atomic<bool> trackAllocations{false};
@@ -70,6 +71,7 @@ void callback() { auto invoke=std::exchange(hook,{}); if (invoke) invoke(); }
 namespace data { enum { Humanoid,Undead }; inline int soundStunBreak=0; bool isRaceType(RE::Actor*,int) { return true; } }
 namespace OwnedEffects { enum Flag { downed }; inline int ownership=0; bool contains(RE::Actor*,Flag) { return false; } void add(RE::Actor*,Flag) { ++ownership; } void remove(RE::Actor*,Flag) { --ownership; } }
 namespace Utils::Actor { bool isDead(RE::Actor* actor) { return actor->dead; } }
+namespace encounters { inline Tier testTier=Tier::normal; Classification classify(RE::Actor*) { return {testTier}; } }
 namespace inlineUtils { void offsetRealDamage(float&,RE::Actor*,RE::Actor*) {} }
 namespace ValhallaUtils { void playSound(RE::Actor*,int) {} }
 namespace TrueHUDUtils {
@@ -133,8 +135,19 @@ int main() {
 	require(h->getMaxStun(&target)==1 && h->getMaxStun(&other)==1 && OwnedEffects::ownership==0 && TrueHUDUtils::overrides==0);
 	settings::bStunToggle=true;
 	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
-	h->update(3.5f); require(std::abs(h->getCurrentStun(&target)-100.f/14)<.0001f);
-	h->update(6.5f); require(h->getMaxStun(&target)==1);
+	h->update(3.0f); require(h->getIsStunBroken(&target));
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+	h->update(0.5f); require(!h->getIsStunBroken(&target) && h->getMaxStun(&target)==1);
+	encounters::testTier=encounters::Tier::boss;
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+	h->update(settings::fStunBrokenWindow);
+	require(!h->getIsStunBroken(&target) && h->getCurrentStun(&target)==100);
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+	require(!h->getIsStunBroken(&target) && h->getCurrentStun(&target)==100);
+	h->update(settings::fBossStunResistance);
+	h->processStunDamage(stunHandler::powerAttack,nullptr,&attacker,&target,100);
+	require(h->getIsStunBroken(&target));
+	h->reset(); encounters::testTier=encounters::Tier::normal;
 
  // Existing-state modifications should update one published entry without allocating a replacement map.
  std::vector<RE::Actor> population(32);
